@@ -827,10 +827,14 @@
   }
   function printInterviewReport22(appId){
     const d=reportData22(appId);if(!d||(!d.hr&&!d.user))return showToast('Belum ada hasil interview','warning');
-    const w=window.open('','_blank','noopener,noreferrer');if(!w)return showToast('Popup diblokir browser. Izinkan popup untuk mencetak laporan.','warning');
     const profile=[['Pendidikan',d.c.education],['Domisili',d.c.city],['Pengalaman',d.c.experience],['Posisi terakhir',d.c.last_role],['Perusahaan terakhir',d.c.last_company],['Alasan melamar',d.c.apply_reason]].filter(x=>x[1]);
     const html=`<!doctype html><html><head><meta charset="utf-8"><title>Laporan Interview - ${e22(d.c.candidate_name||'Kandidat')}</title><style>${printCss22()}</style></head><body><div class="page"><div class="head"><div class="eyebrow">Recruitment Assessment Report</div><div class="title">${e22(d.c.candidate_name||'-')}</div><div class="sub">${e22(d.p?.position_name||'-')} | ${e22(d.co?.brand||d.co?.company_name||'-')} | ${e22(d.app.application_id)}</div></div>${profile.length?`<div class="grid">${profile.map(([k,v])=>`<div class="card soft"><div class="small">${e22(k)}</div><b>${e22(v)}</b></div>`).join('')}</div>`:''}<div class="summary"><b>Kesimpulan Terintegrasi</b><div style="margin-top:5px">${e22(combinedNarrative22(d))}</div></div>${printStage22(d.hr,d.c)}${printStage22(d.user,d.c)}<div class="footer">Dokumen internal rekrutmen. Analisa dirangkum dari data scorecard yang tersimpan dan bukan fakta tambahan di luar hasil interview.</div></div><script>setTimeout(function(){window.print();},350);<\/script></body></html>`;
-    w.document.open();w.document.write(html);w.document.close();
+    const blob=new Blob([html],{type:'text/html;charset=utf-8'});
+    const printUrl=URL.createObjectURL(blob);
+    const w=window.open(printUrl,'_blank');
+    if(!w){URL.revokeObjectURL(printUrl);return showToast('Popup diblokir browser. Izinkan popup untuk mencetak laporan.','warning');}
+    try{w.opener=null;}catch(_){}
+    setTimeout(()=>{try{URL.revokeObjectURL(printUrl);}catch(_){}},60000);
   }
 
   function openInterviewReview22(appId,type){
@@ -1462,3 +1466,5 @@ Tim Rekrutmen {brand}`
     'color:#0f766e;font-weight:bold'
   );
 })();
+
+console.log('%cATS V2.4 B1 Print Fix V2 active','color:#2563eb;font-weight:bold');
