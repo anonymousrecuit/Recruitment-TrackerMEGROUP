@@ -867,3 +867,250 @@
 
   console.log('%cRecruitment ATS V2.2 Workflow Quality active','color:#0f766e;font-weight:bold');
 })();
+
+/* ========================================================================== 
+   RECRUITMENT ATS V2.3 - INTERVIEW USER WHATSAPP DELIVERY
+   UX revision:
+   - Interview User scorecard link can be generated and opened directly in WA.
+   - Interviewer/User WhatsApp number is a required, purposeful field.
+   - Adds a dedicated editable WhatsApp template for the interviewer scorecard.
+   - Existing active links can be resent, copied, or opened without regenerating.
+   - No database/schema changes.
+   ========================================================================== */
+(function(){
+  'use strict';
+
+  const V23_TEMPLATE_ID='interview_user_scorecard';
+  const V23_DEFAULT_TEMPLATE={
+    id:V23_TEMPLATE_ID,
+    name:'Permintaan Penilaian Interview User',
+    stages:['Interview User'],
+    fields:['nama_user','nama_kandidat','tanggal','link'],
+    body:`Halo {nama_user},
+
+Mohon bantuan untuk melakukan penilaian *Interview User* kandidat berikut:
+
+👤 Kandidat: *{nama_kandidat}*
+💼 Posisi: *{posisi}*
+🏢 Perusahaan/Brand: *{brand}*
+📅 Jadwal Interview: {tanggal}
+
+🔗 Link Scorecard:
+{link}
+
+Silakan isi scorecard setelah proses interview selesai. Link ini ditujukan untuk interviewer/User terkait.
+
+Terima kasih.
+{rekruter}
+Tim Rekrutmen {brand}`
+  };
+
+  const h23=v=>typeof window.atsEsc==='function'?window.atsEsc(v):String(v??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[ch]));
+  const getApp23=id=>typeof window.getApplication==='function'?window.getApplication(id):(window.DB?.applications||[]).find(x=>x.application_id===id);
+  const getCand23=id=>typeof window.getCandidate==='function'?window.getCandidate(id):(window.DB?.candidates||[]).find(x=>x.candidate_id===id);
+  const getPos23=id=>typeof window.getPosition==='function'?window.getPosition(id):(window.DB?.positions||[]).find(x=>x.position_id===id);
+  const getCo23=id=>typeof window.getCompany==='function'?window.getCompany(id):(window.DB?.companies||[]).find(x=>x.company_id===id);
+
+  function normalizePhone23(phone){
+    if(typeof window.normalizeWaPhone==='function')return window.normalizeWaPhone(phone);
+    let p=String(phone||'').replace(/\D/g,'');
+    if(p.startsWith('0'))p='62'+p.slice(1);
+    if(p.startsWith('8')&&p.length>=9)p='62'+p;
+    return p;
+  }
+  function fmtDateTime23(v){
+    if(!v)return'Belum ditentukan';
+    try{return new Date(v).toLocaleString('id-ID',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'});}catch(_){return String(v);}
+  }
+  function portalUrl23(token){
+    const base=typeof window.portalBaseUrl==='function'?window.portalBaseUrl():'interview-scorecard.html';
+    try{const u=new URL(base,window.location.href);u.searchParams.set('token',token);return u.href;}catch(_){return `${base}?token=${encodeURIComponent(token)}`;}
+  }
+  function currentRecruiter23(){
+    return window.currentProfile?.full_name||window.currentAuthUser?.email||(typeof window.getUser==='function'?window.getUser('U04')?.name:null)||'HR';
+  }
+  function getSchedule23(appId){
+    if(typeof window.scheduledInterview==='function')return window.scheduledInterview(appId,'Interview User');
+    return (window.DB?.interviews||[]).filter(i=>i.application_id===appId&&i.interview_type==='Interview User'&&i.date).sort((a,b)=>new Date(b.date||0)-new Date(a.date||0))[0]||null;
+  }
+  function getLink23(appId){
+    if(typeof window.latestInterviewLink==='function')return window.latestInterviewLink(appId,'Interview User');
+    return (window.DB?.interview_links||[]).filter(x=>x.application_id===appId&&x.interview_type==='Interview User'&&x.status!=='Dicabut').sort((a,b)=>new Date(b.created_at||0)-new Date(a.created_at||0))[0]||null;
+  }
+
+  function ensureTemplate23(){
+    try{
+      if(typeof window.getWaTemplates!=='function'||typeof window.saveWaTemplates!=='function')return;
+      const list=window.getWaTemplates()||[];
+      if(list.some(t=>t.id===V23_TEMPLATE_ID))return;
+      list.push(JSON.parse(JSON.stringify(V23_DEFAULT_TEMPLATE)));
+      window.saveWaTemplates(list);
+    }catch(e){console.warn('ATS V2.3 template setup',e);}
+  }
+
+  function template23(){
+    ensureTemplate23();
+    try{return (window.getWaTemplates?.()||[]).find(t=>t.id===V23_TEMPLATE_ID)||V23_DEFAULT_TEMPLATE;}catch(_){return V23_DEFAULT_TEMPLATE;}
+  }
+
+  function messageMap23(appId,link,userName){
+    const app=getApp23(appId),c=getCand23(app?.candidate_id),p=getPos23(app?.position_id),co=getCo23(app?.company_id),sched=getSchedule23(appId);
+    return{
+      nama_user:userName||link?.interviewer_name||sched?.interviewer||'Bapak/Ibu User',
+      nama_kandidat:c?.candidate_name||'Kandidat',
+      nama:c?.candidate_name||'Kandidat',
+      posisi:p?.position_name||'-',
+      brand:co?.brand||co?.company_name||'-',
+      tanggal:fmtDateTime23(sched?.date),
+      link:link?.token?portalUrl23(link.token):'-',
+      lokasi:link?.token?portalUrl23(link.token):'-',
+      kode:link?.token?portalUrl23(link.token):'-',
+      rekruter:currentRecruiter23()
+    };
+  }
+
+  function buildMessage23(appId,link,userName){
+    const tpl=template23(),map=messageMap23(appId,link,userName);
+    try{
+      if(typeof window.fillWaTemplate==='function')return window.fillWaTemplate(tpl.body,map);
+    }catch(_){}
+    return Object.entries(map).reduce((txt,[k,v])=>txt.replace(new RegExp('\\{'+k+'\\}','g'),v||'-'),tpl.body||V23_DEFAULT_TEMPLATE.body);
+  }
+
+  function statusLabel23(link){
+    if(!link)return'Belum ada link';
+    const expired=link.expires_at&&new Date(link.expires_at)<new Date();
+    return expired&&link.status==='Belum Diisi'?'Kedaluwarsa':(link.status||'Aktif');
+  }
+
+  function decorateSettings23(){
+    const root=document.getElementById('page-settings');if(!root)return;
+    const h=[...root.querySelectorAll('h2')].find(x=>/Template WhatsApp/i.test(x.textContent||''));
+    const p=h?.nextElementSibling;
+    if(p&&p.tagName==='P'&&!/nama_user/.test(p.textContent||'')){
+      p.textContent='Placeholder umum: {nama} {posisi} {brand} {rekruter} {tanggal} {kode} {lokasi}. Template penilaian User juga mendukung: {nama_user} {nama_kandidat} {link}.';
+    }
+  }
+
+  function refreshAfterLink23(){
+    try{if(typeof window.renderSelectionQueueV21==='function'&&window.currentPage==='selection-queue')window.renderSelectionQueueV21(false);}catch(_){}
+    try{if(typeof window.currentPage!=='undefined'&&window.currentPage==='candidate-detail'&&typeof window.simplifyCandidateDetailV21==='function'){
+      const appId=window.V21?.detailAppId; if(appId)window.simplifyCandidateDetailV21(appId);
+    }}catch(_){}
+  }
+
+  function openLinkModal23(appId,typeOverride){
+    const app=getApp23(appId),c=getCand23(app?.candidate_id),p=getPos23(app?.position_id);if(!app||!c)return window.showToast?.('Data kandidat tidak ditemukan','danger');
+    const type=typeOverride||'Interview User';
+    if(type!=='Interview User')return window.showToast?.('Link eksternal hanya digunakan untuk Interview User.','warning');
+    try{if(typeof window.hasCompletedHrInterview==='function'&&!window.hasCompletedHrInterview(appId))return window.showToast?.('Hasil Interview HR harus selesai sebelum Interview User.','warning');}catch(_){}
+    const sched=getSchedule23(appId);if(!sched)return window.showToast?.('Interview User harus dijadwalkan terlebih dahulu sebelum membuat link.','warning');
+    ensureTemplate23();
+    const existing=getLink23(appId),existingUrl=existing?.token?portalUrl23(existing.token):'';
+    const who=existing?.interviewer_name||sched?.interviewer||'';
+    const contact=existing?.interviewer_contact||'';
+    const message=existing?buildMessage23(appId,existing,who):'';
+    const modal=document.getElementById('modalContent');if(modal)modal.className='bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[92vh] overflow-y-auto';
+    window.openModal?.(`<div class="p-6">
+      <div class="flex justify-between gap-3">
+        <div><div class="text-[10px] uppercase tracking-wider text-purple-500 font-bold">Interview User</div><h3 class="font-bold text-xl">Kirim Link Scorecard ke User</h3><p class="text-xs text-slate-500 mt-1">${h23(c.candidate_name||'')} · ${h23(p?.position_name||'')}</p></div>
+        <button onclick="closeModal()" class="text-slate-400 text-xl">×</button>
+      </div>
+      ${existing?`<div class="mt-4 rounded-xl border bg-slate-50 p-4"><div class="flex flex-wrap justify-between gap-2"><div><div class="text-xs text-slate-400">Status Link</div><div class="font-semibold">${h23(statusLabel23(existing))}</div></div><div><div class="text-xs text-slate-400">Berlaku sampai</div><div class="font-semibold">${h23(fmtDateTime23(existing.expires_at))}</div></div></div><div class="mt-3 text-[11px] text-slate-500 break-all">${h23(existingUrl)}</div></div>`:''}
+      <div class="grid md:grid-cols-2 gap-3 mt-4">
+        <div><label class="text-xs font-semibold text-slate-600">Nama Interviewer / User *</label><input id="portalWhoV23" class="w-full border rounded-lg px-3 py-2 mt-1" value="${h23(who)}" placeholder="Nama Hiring Manager / User" ${existing?'readonly':''}></div>
+        <div><label class="text-xs font-semibold text-slate-600">Nomor WhatsApp User *</label><input id="portalContactV23" class="w-full border rounded-lg px-3 py-2 mt-1" value="${h23(contact)}" placeholder="08xxxxxxxxxx" ${existing?'readonly':''}><p class="text-[10px] text-slate-400 mt-1">Dipakai untuk membuka chat WhatsApp dengan pesan & link scorecard.</p></div>
+        ${!existing?`<div><label class="text-xs font-semibold text-slate-600">Masa berlaku link</label><select id="portalExpiryV23" class="w-full border rounded-lg px-3 py-2 mt-1"><option value="1">1 hari</option><option value="3">3 hari</option><option value="7" selected>7 hari</option><option value="14">14 hari</option></select></div><div class="rounded-lg bg-blue-50 border border-blue-100 p-3 text-xs text-blue-800"><b>Setelah klik tombol:</b><br>link dibuat di Supabase lalu WhatsApp User langsung dibuka. HR tinggal menekan <b>Send</b>.</div>`:''}
+      </div>
+      ${existing?`<div class="mt-4"><label class="text-xs font-semibold text-slate-600">Preview pesan WhatsApp</label><textarea id="interviewUserWaPreviewV23" rows="10" class="w-full border rounded-xl p-3 text-xs mt-1">${h23(message)}</textarea><p class="text-[10px] text-slate-400 mt-1">Template: <b>Pengaturan Proses → Template WhatsApp → Permintaan Penilaian Interview User</b></p></div>`:''}
+      <div class="flex flex-wrap justify-end gap-2 mt-5">
+        <button onclick="closeModal()" class="px-3 py-2 border rounded-lg text-sm">Tutup</button>
+        ${existing?`<button onclick="copyInterviewUserLinkV23('${h23(existing.token)}')" class="px-3 py-2 border rounded-lg text-sm">Salin Link</button><button onclick="openInterviewUserLinkV23('${h23(existing.token)}')" class="px-3 py-2 border rounded-lg text-sm">Buka Link</button><button onclick="sendInterviewUserWhatsAppV23('${h23(appId)}')" class="px-4 py-2 bg-green-600 text-white rounded-lg text-sm font-semibold"><i class="fab fa-whatsapp mr-1"></i>Kirim WhatsApp</button>`:`<button onclick="generateInterviewUserLinkV23('${h23(appId)}')" class="px-4 py-2 bg-green-600 text-white rounded-lg text-sm font-semibold"><i class="fab fa-whatsapp mr-1"></i>Generate & Kirim WhatsApp</button>`}
+      </div>
+      ${existing&&typeof window.revokePortalLink==='function'?`<div class="mt-4 pt-3 border-t text-right"><button onclick="revokePortalLink('${h23(existing.link_id)}','${h23(appId)}','Interview User')" class="text-xs text-red-600 hover:underline">Cabut link ini</button></div>`:''}
+    </div>`);
+  }
+
+  async function generateLink23(appId){
+    const who=document.getElementById('portalWhoV23')?.value?.trim()||'';
+    const contactRaw=document.getElementById('portalContactV23')?.value?.trim()||'';
+    const phone=normalizePhone23(contactRaw);
+    if(!who)return window.showToast?.('Nama interviewer/User wajib diisi','warning');
+    if(!phone||phone.length<10)return window.showToast?.('Nomor WhatsApp User belum valid','warning');
+    const expiry=Number(document.getElementById('portalExpiryV23')?.value||7);
+    // Open a blank tab synchronously to avoid popup blockers after awaiting the RPC.
+    const waWin=window.open('about:blank','_blank');
+    try{
+      const {data,error}=await window.sb.rpc('create_interview_portal_link',{
+        p_application_id:appId,
+        p_interview_type:'Interview User',
+        p_interviewer_name:who,
+        p_interviewer_contact:contactRaw,
+        p_expiry_days:expiry
+      });
+      if(error)throw error;
+      const row=Array.isArray(data)?data[0]:data;
+      if(!row?.token)throw new Error('Token link tidak diterima dari server');
+      const link={...row,interviewer_name:who,interviewer_contact:contactRaw};
+      const msg=buildMessage23(appId,link,who);
+      if(typeof window.loadFromSupabase==='function')await window.loadFromSupabase();
+      refreshAfterLink23();
+      const waUrl=`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`;
+      if(waWin&&!waWin.closed)waWin.location.href=waUrl;else window.open(waUrl,'_blank','noopener');
+      window.closeModal?.();
+      window.showToast?.('Link User berhasil dibuat. WhatsApp dibuka; tinggal tekan Send.','success');
+    }catch(e){
+      try{if(waWin&&!waWin.closed)waWin.close();}catch(_){}
+      window.showToast?.('Gagal membuat link: '+(e.message||e),'danger');
+    }
+  }
+
+  async function sendWhatsApp23(appId){
+    const link=getLink23(appId);if(!link?.token)return window.showToast?.('Link Interview User belum tersedia','warning');
+    const userName=document.getElementById('portalWhoV23')?.value?.trim()||link.interviewer_name||getSchedule23(appId)?.interviewer||'';
+    const raw=document.getElementById('portalContactV23')?.value?.trim()||link.interviewer_contact||'';
+    const phone=normalizePhone23(raw);if(!phone||phone.length<10)return window.showToast?.('Nomor WhatsApp User tidak valid. Buat ulang link dengan nomor yang benar.','warning');
+    const editable=document.getElementById('interviewUserWaPreviewV23')?.value;
+    const msg=editable||buildMessage23(appId,link,userName);
+    window.open(`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`,'_blank','noopener');
+  }
+
+  async function copyLink23(token){
+    const url=portalUrl23(token);
+    try{await navigator.clipboard.writeText(url);window.showToast?.('Link scorecard disalin','success');}catch(_){window.prompt('Salin link ini:',url);}
+  }
+  function openLink23(token){window.open(portalUrl23(token),'_blank','noopener');}
+
+  function decorateActionLabels23(){
+    document.querySelectorAll('button').forEach(b=>{
+      const txt=(b.textContent||'').trim();
+      if(txt==='Buat Link Scorecard User')b.innerHTML='<i class="fab fa-whatsapp mr-1"></i>Generate & Kirim WhatsApp';
+      if(txt==='Lihat / Salin Link User')b.innerHTML='<i class="fab fa-whatsapp mr-1"></i>Kirim / Kelola Link User';
+    });
+  }
+
+  // Preserve a reference for diagnostics, then replace the old modal/generate flow.
+  if(typeof window.openInterviewerLinkModal==='function'&&!window.openInterviewerLinkModalV22Original)window.openInterviewerLinkModalV22Original=window.openInterviewerLinkModal;
+  if(typeof window.generatePortalLink==='function'&&!window.generatePortalLinkV22Original)window.generatePortalLinkV22Original=window.generatePortalLink;
+  window.openInterviewerLinkModal=openLinkModal23;
+  window.generatePortalLink=generateLink23;
+  Object.assign(window,{
+    generateInterviewUserLinkV23:generateLink23,
+    sendInterviewUserWhatsAppV23:sendWhatsApp23,
+    copyInterviewUserLinkV23:copyLink23,
+    openInterviewUserLinkV23:openLink23,
+    ensureInterviewUserWaTemplateV23:ensureTemplate23
+  });
+
+  ensureTemplate23();
+  if(typeof window.renderSettings==='function'&&!window.renderSettings.__v23wrapped){
+    const orig=window.renderSettings;
+    const wrapped=function(...args){ensureTemplate23();const r=orig.apply(this,args);setTimeout(decorateSettings23,0);return r;};
+    wrapped.__v23wrapped=true;window.renderSettings=wrapped;
+  }
+  const observer=new MutationObserver(()=>{decorateActionLabels23();decorateSettings23();});
+  observer.observe(document.body,{subtree:true,childList:true});
+  document.addEventListener('DOMContentLoaded',()=>setTimeout(()=>{ensureTemplate23();decorateActionLabels23();decorateSettings23();},1600));
+
+  console.log('%cRecruitment ATS V2.3 Interview User WhatsApp active','color:#16a34a;font-weight:bold');
+})();
