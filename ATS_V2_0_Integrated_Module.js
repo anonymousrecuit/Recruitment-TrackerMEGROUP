@@ -1114,3 +1114,351 @@ Tim Rekrutmen {brand}`
 
   console.log('%cRecruitment ATS V2.3 Interview User WhatsApp active','color:#16a34a;font-weight:bold');
 })();
+
+/* ==========================================================================
+   RECRUITMENT ATS V2.4 - PHASE B1
+   PRIVATE CV / SIGNED URL COMPATIBILITY
+
+   Purpose:
+   - Prepare Tracker before cv-uploads is changed from public to private.
+   - All HR-side CV reads use short-lived Supabase signed URLs.
+   - Existing Career upload flow is untouched.
+   - No database mutation is performed by this frontend patch.
+   ========================================================================== */
+(function(){
+  'use strict';
+
+  if(window.__ATS_V24_CV_SIGNED_URL_ACTIVE) return;
+  window.__ATS_V24_CV_SIGNED_URL_ACTIVE = true;
+
+  const V24CV = {
+    bucket: 'cv-uploads',
+    signedTtlSeconds: 900,
+    cacheMs: 12 * 60 * 1000,
+    cache: new Map(),
+    detailCandidateId: null,
+    patchTimer: null
+  };
+
+  function cvToast24(message, type='warning'){
+    try{
+      if(typeof window.showToast === 'function') return window.showToast(message, type);
+    }catch(_){}
+    console.warn(message);
+  }
+
+  function getCandidate24(candidateId){
+    try{
+      if(typeof window.getCandidate === 'function') return window.getCandidate(candidateId);
+      return (window.DB?.candidates || []).find(x => x.candidate_id === candidateId) || null;
+    }catch(_){
+      return null;
+    }
+  }
+
+  function getApplication24(appId){
+    try{
+      if(typeof window.getApplication === 'function') return window.getApplication(appId);
+      return (window.DB?.applications || []).find(x => x.application_id === appId) || null;
+    }catch(_){
+      return null;
+    }
+  }
+
+  function getPosition24(positionId){
+    try{
+      if(typeof window.getPosition === 'function') return window.getPosition(positionId);
+      return (window.DB?.positions || []).find(x => x.position_id === positionId) || null;
+    }catch(_){
+      return null;
+    }
+  }
+
+  function normalizeCvObjectPath24(raw){
+    let value = String(raw || '').trim();
+    if(!value) return '';
+
+    try{
+      if(/^https?:\/\//i.test(value)){
+        const u = new URL(value);
+        let pathname = u.pathname || '';
+        try{ pathname = decodeURIComponent(pathname); }catch(_){}
+
+        const markers = [
+          '/storage/v1/object/public/cv-uploads/',
+          '/storage/v1/object/sign/cv-uploads/',
+          '/storage/v1/object/authenticated/cv-uploads/'
+        ];
+
+        for(const marker of markers){
+          const idx = pathname.indexOf(marker);
+          if(idx >= 0){
+            return pathname.slice(idx + marker.length).replace(/^\/+/, '');
+          }
+        }
+        return '';
+      }
+    }catch(_){}
+
+    value = value.split('#')[0].split('?')[0];
+    try{ value = decodeURIComponent(value); }catch(_){}
+    value = value.replace(/^\/+/, '');
+    value = value.replace(/^cv-uploads\//i, '');
+    return value.replace(/^\/+/, '');
+  }
+
+  function absoluteSignedUrl24(url){
+    const raw = String(url || '');
+    if(!raw) return '';
+    if(/^https?:\/\//i.test(raw)) return raw;
+    const base = String(window.SUPABASE_URL || '').replace(/\/+$/, '');
+    return base + (raw.startsWith('/') ? raw : '/' + raw);
+  }
+
+  async function getSignedCvUrl24(cvPath, forceRefresh=false){
+    const objectPath = normalizeCvObjectPath24(cvPath);
+    if(!objectPath) throw new Error('CV_PATH_INVALID');
+
+    const cached = V24CV.cache.get(objectPath);
+    if(!forceRefresh && cached && cached.expiresAt > Date.now()){
+      return cached.url;
+    }
+
+    const client = window.sb;
+    if(!client?.storage?.from) throw new Error('STORAGE_CLIENT_NOT_READY');
+
+    const {data, error} = await client.storage
+      .from(V24CV.bucket)
+      .createSignedUrl(objectPath, V24CV.signedTtlSeconds);
+
+    if(error) throw error;
+
+    const signedUrl = absoluteSignedUrl24(data?.signedUrl);
+    if(!signedUrl) throw new Error('SIGNED_URL_EMPTY');
+
+    V24CV.cache.set(objectPath, {
+      url: signedUrl,
+      expiresAt: Date.now() + V24CV.cacheMs
+    });
+
+    return signedUrl;
+  }
+
+  async function getCandidateSignedCvUrl24(candidateId, forceRefresh=false){
+    const c = getCandidate24(candidateId);
+    if(!c?.cv_path) throw new Error('CV_NOT_AVAILABLE');
+    return getSignedCvUrl24(c.cv_path, forceRefresh);
+  }
+
+  function cvExtension24(cvPath){
+    const p = normalizeCvObjectPath24(cvPath);
+    const name = (p.split('/').pop() || 'cv.pdf').split('?')[0];
+    const m = name.match(/\.([a-z0-9]{1,5})$/i);
+    const ext = (m?.[1] || 'pdf').toLowerCase();
+    return ['pdf','doc','docx'].includes(ext) ? ext : 'pdf';
+  }
+
+  async function openCandidateCvSecure24(candidateId){
+    const c = getCandidate24(candidateId);
+    if(!c?.cv_path){
+      return cvToast24('CV kandidat belum tersedia.', 'warning');
+    }
+
+    // Open synchronously so the browser does not block the new tab
+    // while the signed URL is being requested.
+    const popup = window.open('about:blank', '_blank');
+    try{
+      const url = await getSignedCvUrl24(c.cv_path);
+      if(popup && !popup.closed){
+        popup.opener = null;
+        popup.location.replace(url);
+      }else{
+        window.open(url, '_blank', 'noopener');
+      }
+    }catch(error){
+      console.error('[ATS V2.4] secure CV open failed', error);
+      try{ if(popup && !popup.closed) popup.close(); }catch(_){}
+      cvToast24(
+        'CV tidak dapat dibuka. Muat ulang Tracker lalu coba kembali. Jika tetap gagal, hubungi administrator.',
+        'danger'
+      );
+    }
+  }
+
+  async function patchCandidateDetailCv24(candidateId){
+    const c = getCandidate24(candidateId);
+    if(!c?.cv_path) return;
+
+    const root = document.getElementById('modalContent');
+    if(!root) return;
+
+    try{
+      const signedUrl = await getSignedCvUrl24(c.cv_path);
+
+      root.querySelectorAll('iframe[title="Preview CV"]').forEach(frame => {
+        const suffix = '#toolbar=1&navpanes=0';
+        if(frame.src !== signedUrl + suffix){
+          frame.src = signedUrl + suffix;
+          frame.dataset.atsV24SecureCv = '1';
+        }
+      });
+
+      root.querySelectorAll('a[href]').forEach(anchor => {
+        const href = anchor.getAttribute('href') || '';
+        const label = (anchor.textContent || '').trim();
+        if(
+          href.includes('/cv-uploads/') ||
+          /^(buka|unduh|download).{0,12}cv$/i.test(label) ||
+          /cv/i.test(label) && href.includes('/storage/v1/object/')
+        ){
+          anchor.href = signedUrl;
+          anchor.rel = 'noopener';
+          anchor.dataset.atsV24SecureCv = '1';
+        }
+      });
+    }catch(error){
+      console.error('[ATS V2.4] candidate detail CV signing failed', error);
+      // Do not destroy the current UI. During B1 the old public URL still works.
+      // After B2 this condition is surfaced through Open CV and test checklist.
+    }
+  }
+
+  function scheduleDetailPatch24(candidateId){
+    if(candidateId) V24CV.detailCandidateId = candidateId;
+    clearTimeout(V24CV.patchTimer);
+    V24CV.patchTimer = setTimeout(() => {
+      const id = candidateId || V24CV.detailCandidateId;
+      if(id) patchCandidateDetailCv24(id);
+    }, 60);
+  }
+
+  // Candidate Detail currently renders a public Storage URL synchronously.
+  // Wrap it and replace the rendered iframe/link with a signed URL immediately.
+  if(typeof window.viewCandidateDetail === 'function' && !window.viewCandidateDetail.__atsV24CvWrapped){
+    const originalViewCandidateDetail24 = window.viewCandidateDetail;
+    const wrappedViewCandidateDetail24 = function(candidateId, ...args){
+      V24CV.detailCandidateId = candidateId || null;
+      const result = originalViewCandidateDetail24.call(this, candidateId, ...args);
+      Promise.resolve(result)
+        .catch(() => null)
+        .finally(() => scheduleDetailPatch24(candidateId));
+      return result;
+    };
+    wrappedViewCandidateDetail24.__atsV24CvWrapped = true;
+    wrappedViewCandidateDetail24.__atsV24Original = originalViewCandidateDetail24;
+    window.viewCandidateDetail = wrappedViewCandidateDetail24;
+  }
+
+  // Replace all button/inline-handler calls to the legacy public URL opener.
+  if(typeof window.openCandidateCV === 'function' && !window.openCandidateCVV23Original){
+    window.openCandidateCVV23Original = window.openCandidateCV;
+  }
+  window.openCandidateCV = openCandidateCvSecure24;
+
+  // Replace Candidate Package download so ZIP creation also reads CV through
+  // a signed URL rather than the public Storage endpoint.
+  if(typeof window.downloadCandidatePackage === 'function' && !window.downloadCandidatePackageV23Original){
+    window.downloadCandidatePackageV23Original = window.downloadCandidatePackage;
+  }
+
+  window.downloadCandidatePackage = async function(appId){
+    const a = getApplication24(appId);
+    const c = getCandidate24(a?.candidate_id);
+    const p = getPosition24(a?.position_id);
+
+    if(!a || !c){
+      return cvToast24('Data kandidat tidak ditemukan.', 'danger');
+    }
+    if(!window.JSZip){
+      return cvToast24('ZIP library belum termuat. Muat ulang halaman lalu coba kembali.', 'danger');
+    }
+
+    const zip = new JSZip();
+    const safe = String(c.candidate_name || 'Kandidat')
+      .replace(/[^a-z0-9]+/gi, '_')
+      .replace(/^_+|_+$/g, '') || 'Kandidat';
+
+    try{
+      if(typeof window.buildInterviewPdfDoc === 'function'){
+        const doc = window.buildInterviewPdfDoc(appId);
+        if(doc) zip.file(`01_Hasil_Interview_${safe}.pdf`, doc.output('arraybuffer'));
+      }
+    }catch(error){
+      console.warn('[ATS V2.4] interview PDF skipped in candidate package', error);
+    }
+
+    let background = [];
+    try{
+      if(typeof window.candidateCvBackground === 'function'){
+        background = window.candidateCvBackground(c) || [];
+      }
+    }catch(_){}
+
+    const profile = [
+      `Nama: ${c.candidate_name || '-'}`,
+      `Posisi: ${p?.position_name || '-'}`,
+      `Email: ${c.email || '-'}`,
+      `WhatsApp: ${c.phone || '-'}`,
+      ...background
+    ].join('\n');
+
+    zip.file(`02_Profile_${safe}.txt`, profile);
+
+    if(c.cv_path){
+      try{
+        const signedUrl = await getSignedCvUrl24(c.cv_path);
+        const response = await fetch(signedUrl, {cache:'no-store'});
+        if(!response.ok) throw new Error(`CV_FETCH_${response.status}`);
+        const blob = await response.blob();
+        zip.file(`03_CV_${safe}.${cvExtension24(c.cv_path)}`, blob);
+      }catch(error){
+        console.error('[ATS V2.4] CV package fetch failed', error);
+        zip.file(
+          '03_CV_Tidak_Dapat_Diakses.txt',
+          'CV tercatat pada profil kandidat tetapi tidak dapat diambil saat paket dibuat. ' +
+          'Buka Candidate 360 dan gunakan tombol Buka CV setelah memastikan Anda memiliki akses perusahaan terkait.'
+        );
+      }
+    }else{
+      zip.file('03_CV_Belum_Tersedia.txt', 'CV belum tersimpan pada profil kandidat.');
+    }
+
+    try{
+      const blob = await zip.generateAsync({type:'blob'});
+      const url = URL.createObjectURL(blob);
+      const el = document.createElement('a');
+      el.href = url;
+      el.download = `Paket_Kandidat_${safe}.zip`;
+      document.body.appendChild(el);
+      el.click();
+      el.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1500);
+      cvToast24('Paket kandidat diunduh.', 'success');
+    }catch(error){
+      console.error('[ATS V2.4] candidate package generation failed', error);
+      cvToast24('Paket kandidat gagal dibuat. Silakan coba kembali.', 'danger');
+    }
+  };
+
+  // Candidate Detail can be re-rendered by the V2.1/V2.2 UX layer.
+  // Re-apply the signed URL after DOM changes without touching other pages.
+  const cvObserver24 = new MutationObserver(() => {
+    if(V24CV.detailCandidateId && document.getElementById('modalContent')){
+      scheduleDetailPatch24(V24CV.detailCandidateId);
+    }
+  });
+  cvObserver24.observe(document.body, {subtree:true, childList:true});
+
+  Object.assign(window, {
+    ATS_V24_CV: V24CV,
+    normalizeCvObjectPathV24: normalizeCvObjectPath24,
+    getSignedCvUrlV24: getSignedCvUrl24,
+    getCandidateSignedCvUrlV24: getCandidateSignedCvUrl24,
+    patchCandidateDetailCvV24: patchCandidateDetailCv24
+  });
+
+  console.log(
+    '%cRecruitment ATS V2.4 Phase B1 CV signed URL compatibility active',
+    'color:#0f766e;font-weight:bold'
+  );
+})();
