@@ -133,8 +133,27 @@
   async function rotatePsychAccess(appId){const {data,error}=await sb.rpc('rotate_psychotest_access',{p_application_id:appId,p_expiry_days:7});if(error)return showToast('Gagal ganti kode: '+error.message,'danger');await loadPsych(true);showAccessModal(appId,data);if(currentPage==='psychotests')renderPsych(false);}
   async function createPsychRetest(appId){if(!confirm('Buat attempt psikotes baru? Hasil attempt sebelumnya tetap disimpan.'))return;const {data,error}=await sb.rpc('create_psychotest_retest',{p_application_id:appId,p_expiry_days:7});if(error)return showToast('Gagal buat retest: '+error.message,'danger');await loadPsych(true);showAccessModal(appId,data);if(currentPage==='psychotests')renderPsych(false);}
   function showPsychAccess(appId){const s=latestPsych(appId);if(!s)return showToast('Sesi belum tersedia','warning');showAccessModal(appId,s);}
-  function showAccessModal(appId,row){const app=appById(appId),c=candById(app?.candidate_id),p=posById(app?.position_id),co=coById(app?.company_id),code=row?.access_code||latestPsych(appId)?.access_code||'';const url=psychBaseUrl();const msg=`Halo ${c?.candidate_name||'Kandidat'},\\n\\nAnda diundang mengikuti Psikotes untuk posisi ${p?.position_name||'-'} di ${co?.brand||co?.company_name||'-'}.\\n\\nLink: ${url}\\nKode Akses: ${code}\\n\\nKode berlaku sampai ${fmt(row?.expires_at||latestPsych(appId)?.expires_at)}. Mohon selesaikan psikotes sesuai petunjuk.\\n\\nTerima kasih.
-`;openModal(`<div class="p-6"><h3 class="font-bold text-lg">Akses Psikotes Kandidat</h3><p class="text-xs text-slate-500 mt-1">Link tetap + kode 8 karakter. Jangan kirim hasil psikotes kepada kandidat.</p><div class="mt-4 bg-slate-50 border rounded-xl p-4"><div class="text-xs text-slate-500">Link SiPsiko</div><div class="font-mono text-sm break-all mt-1">${esc(url)}</div><div class="text-xs text-slate-500 mt-4">Kode Akses</div><div class="font-mono text-3xl font-bold tracking-[.25em] mt-1">${esc(code)}</div><div class="text-xs text-slate-400 mt-2">Berlaku s.d. ${esc(fmt(row?.expires_at||latestPsych(appId)?.expires_at))}</div></div><textarea id="v2PsychWaText" class="w-full border rounded-lg p-3 text-xs mt-4" rows="8">${esc(msg)}</textarea><div class="grid grid-cols-2 gap-2 mt-4"><button onclick="copyTextV2('${esc(url)}','Link disalin')" class="px-3 py-2 border rounded-lg text-sm">Salin Link</button><button onclick="copyTextV2('${esc(code)}','Kode disalin')" class="px-3 py-2 border rounded-lg text-sm">Salin Kode</button><button onclick="copyPsychMessageV2()" class="px-3 py-2 bg-slate-800 text-white rounded-lg text-sm">Salin Pesan</button><button onclick="openPsychWhatsAppV2('${appId}')" class="px-3 py-2 bg-green-600 text-white rounded-lg text-sm"><i class="fab fa-whatsapp mr-1"></i>WhatsApp</button></div><div class="text-right mt-3"><button onclick="closeModal()" class="px-3 py-2 border rounded-lg text-sm">Tutup</button></div></div>`);}
+  function psychInviteMessageV22(appId,row){
+    const app=appById(appId),c=candById(app?.candidate_id),p=posById(app?.position_id),co=coById(app?.company_id);
+    const code=row?.access_code||latestPsych(appId)?.access_code||'';
+    const url=psychBaseUrl();
+    const expiry=fmt(row?.expires_at||latestPsych(appId)?.expires_at);
+    const recruiter=(typeof currentAuthUser!=='undefined'&&currentAuthUser?.email)||(typeof currentProfile!=='undefined'&&currentProfile?.full_name)||(typeof getUser==='function'&&getUser('U04')?.name)||'HR';
+    let tpl=null;
+    try{tpl=typeof getWaTemplates==='function'?(getWaTemplates()||[]).find(t=>t.id==='psikotes'):null;}catch(_){}
+    const map={
+      nama:c?.candidate_name||'Kandidat',
+      posisi:p?.position_name||'-',
+      brand:co?.brand||co?.company_name||'-',
+      rekruter:recruiter,
+      tanggal:expiry,
+      kode:`${code}\n🔗 Link: ${url}`,
+      lokasi:url
+    };
+    if(tpl?.body){try{return typeof fillWaTemplate==='function'?fillWaTemplate(tpl.body,map):Object.entries(map).reduce((t,[k,v])=>t.replace(new RegExp('\\{'+k+'\\}','g'),v||'-'),tpl.body);}catch(_){} }
+    return `Halo ${map.nama},\n\nTerima kasih telah melamar posisi *${map.posisi}* di *${map.brand}*.\n\nAnda diundang mengikuti *Psikotes*.\n📅 Batas pengerjaan: ${expiry}\n🔑 Kode Akses: ${code}\n🔗 Link: ${url}\n\nHormat kami,\n${recruiter}\nTim Rekrutmen ${map.brand}`;
+  }
+  function showAccessModal(appId,row){const app=appById(appId),c=candById(app?.candidate_id),code=row?.access_code||latestPsych(appId)?.access_code||'';const url=psychBaseUrl();const expiry=fmt(row?.expires_at||latestPsych(appId)?.expires_at);const msg=psychInviteMessageV22(appId,row);openModal(`<div class="p-6"><h3 class="font-bold text-lg">Akses Psikotes Kandidat</h3><p class="text-xs text-slate-500 mt-1">Pesan di bawah memakai <b>Pengaturan Proses → Template WhatsApp → Undangan Psikotes</b>. Perubahan template akan langsung dipakai pada undangan berikutnya.</p><div class="mt-4 bg-slate-50 border rounded-xl p-4"><div class="text-xs text-slate-500">Link SiPsiko</div><div class="font-mono text-sm break-all mt-1">${esc(url)}</div><div class="text-xs text-slate-500 mt-4">Kode Akses</div><div class="font-mono text-3xl font-bold tracking-[.25em] mt-1">${esc(code)}</div><div class="text-xs text-slate-400 mt-2">Berlaku s.d. ${esc(expiry)}</div></div><label class="block text-xs font-semibold text-slate-600 mt-4 mb-1">Preview Template WhatsApp</label><textarea id="v2PsychWaText" class="w-full border rounded-lg p-3 text-xs" rows="10">${esc(msg)}</textarea><div class="grid grid-cols-2 gap-2 mt-4"><button onclick="copyTextV2('${esc(url)}','Link disalin')" class="px-3 py-2 border rounded-lg text-sm">Salin Link</button><button onclick="copyTextV2('${esc(code)}','Kode disalin')" class="px-3 py-2 border rounded-lg text-sm">Salin Kode</button><button onclick="copyPsychMessageV2()" class="px-3 py-2 bg-slate-800 text-white rounded-lg text-sm">Salin Pesan</button><button onclick="openPsychWhatsAppV2('${appId}')" class="px-3 py-2 bg-green-600 text-white rounded-lg text-sm"><i class="fab fa-whatsapp mr-1"></i>WhatsApp</button></div><div class="text-right mt-3"><button onclick="closeModal()" class="px-3 py-2 border rounded-lg text-sm">Tutup</button></div></div>`);}
   async function copyText(v,msg){try{await navigator.clipboard.writeText(v);showToast(msg||'Disalin','success');}catch(_){showToast('Clipboard tidak tersedia','warning');}}
   async function copyPsychMessage(){return copyText(document.getElementById('v2PsychWaText')?.value||'','Pesan disalin');}
   function openPsychWhatsApp(appId){const app=appById(appId),c=candById(app?.candidate_id);let phone=String(c?.phone||'').replace(/[^0-9]/g,'');if(phone.startsWith('0'))phone='62'+phone.slice(1);const msg=document.getElementById('v2PsychWaText')?.value||'';window.open(`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`,'_blank','noopener');}
@@ -389,7 +408,7 @@
       if(d==='Lanjut')return{tab:'hr',stage,processStatus:'Penilaian selesai',decision:'Lanjut',action:'user-schedule',label:'Jadwalkan Interview User',tone:'emerald'};
       if(d==='Tidak Lanjut')return{tab:'hr',stage,processStatus:'Penilaian selesai',decision:d,action:'reject-finalize',label:'Finalisasi Tidak Lanjut',tone:'red'};
       if(d==='Talent Pool')return{tab:'hr',stage,processStatus:'Penilaian selesai',decision:d,action:'talent-finalize',label:'Masukkan Talent Pool',tone:'amber'};
-      return{tab:'hr',stage,processStatus:'Penilaian selesai',decision:d,action:'hr-result',label:'Review Hasil Interview HR',tone:'amber'};
+      return{tab:'hr',stage,processStatus:'Penilaian selesai',decision:d,action:'hr-review',label:'Review & Putuskan Interview HR',tone:'amber'};
     }
 
     if(stage==='Interview User'){
@@ -403,7 +422,7 @@
       if(d==='Lanjut')return{tab:'user',stage,processStatus:'Penilaian selesai',decision:'Lanjut',action:'user-offering',label:'Buat Offering',tone:'emerald'};
       if(d==='Tidak Lanjut')return{tab:'user',stage,processStatus:'Penilaian selesai',decision:d,action:'reject-finalize',label:'Finalisasi Tidak Lanjut',tone:'red'};
       if(d==='Talent Pool')return{tab:'user',stage,processStatus:'Penilaian selesai',decision:d,action:'talent-finalize',label:'Masukkan Talent Pool',tone:'amber'};
-      return{tab:'user',stage,processStatus:'Penilaian selesai',decision:d,action:'user-result',label:'Review Hasil Interview User',tone:'amber'};
+      return{tab:'user',stage,processStatus:'Penilaian selesai',decision:d,action:'user-review',label:'Review & Putuskan Interview User',tone:'amber'};
     }
 
     if(['Offering','Interview Final','Medical Check Up'].includes(stage)){
@@ -432,7 +451,7 @@
   }
 
   function tabLabel(k){return({screening:'Screening',psych:'Psikotes',hr:'Interview HR',user:'Interview User',offering:'Offering'})[k]||k;}
-  function actionIcon(action){if(action?.includes('screen'))return'fa-filter';if(action?.includes('psych'))return'fa-brain';if(action?.includes('schedule'))return'fa-calendar-plus';if(action?.includes('score')||action?.includes('result'))return'fa-clipboard-check';if(action?.includes('link'))return'fa-link';if(action?.includes('offering'))return'fa-handshake';if(action?.includes('reject'))return'fa-circle-xmark';if(action?.includes('talent'))return'fa-box-archive';return'fa-arrow-right';}
+  function actionIcon(action){if(action?.includes('screen'))return'fa-filter';if(action?.includes('psych'))return'fa-brain';if(action?.includes('schedule'))return'fa-calendar-plus';if(action?.includes('score')||action?.includes('result')||action?.includes('review'))return'fa-clipboard-check';if(action?.includes('link'))return'fa-link';if(action?.includes('offering'))return'fa-handshake';if(action?.includes('reject'))return'fa-circle-xmark';if(action?.includes('talent'))return'fa-box-archive';return'fa-arrow-right';}
 
   async function renderSelectionQueue(reload=true){
     injectSelectionQueueUi();if(reload)await loadQueueData(false);
@@ -491,9 +510,11 @@
       case'psych-advance':return typeof openInterviewModal==='function'?openInterviewModal(appId,'Interview HR'):showToast('Form jadwal Interview HR tidak tersedia','danger');
       case'hr-schedule':return typeof openInterviewModal==='function'?openInterviewModal(appId,'Interview HR'):showToast('Form jadwal Interview HR tidak tersedia','danger');
       case'hr-score':return typeof openInterviewScorecard==='function'?openInterviewScorecard(appId,'Interview HR'):showToast('Scorecard HR tidak tersedia','danger');
+      case'hr-review':return typeof window.openInterviewReviewV22==='function'?window.openInterviewReviewV22(appId,'Interview HR'):showToast('Review Interview HR belum tersedia. Jalankan patch SQL V2.2.','warning');
       case'hr-result':return typeof viewInterviewResult==='function'?viewInterviewResult(appId):showToast('Hasil Interview HR tidak tersedia','warning');
       case'user-schedule':return typeof openInterviewModal==='function'?openInterviewModal(appId,'Interview User'):showToast('Form jadwal Interview User tidak tersedia','danger');
       case'user-link':return typeof openInterviewerLinkModal==='function'?openInterviewerLinkModal(appId,'Interview User'):showToast('Portal Interview User tidak tersedia','danger');
+      case'user-review':return typeof window.openInterviewReviewV22==='function'?window.openInterviewReviewV22(appId,'Interview User'):showToast('Review Interview User belum tersedia. Jalankan patch SQL V2.2.','warning');
       case'user-result':return typeof viewInterviewResult==='function'?viewInterviewResult(appId):showToast('Hasil Interview User tidak tersedia','warning');
       case'reject-finalize':return finalizeRejectV21(appId);
       case'talent-finalize':return finalizeTalentPoolV21(appId);
@@ -634,4 +655,215 @@
   injectSelectionQueueUi();installHooks();
   document.addEventListener('DOMContentLoaded',()=>setTimeout(async()=>{injectSelectionQueueUi();installHooks();await loadQueueData(true);hideLegacyWorkflowNav();if(typeof currentPage!=='undefined'&&currentPage==='pipeline')lockPipeline();if(typeof currentPage!=='undefined'&&currentPage==='dashboard')decorateDashboard();},1450));
   console.log('%cRecruitment ATS V2.1.1 UX Pipeline Lock active','color:#7c3aed;font-weight:bold');
+})();
+
+/* ========================================================================== 
+   ATS V2.2 - WORKFLOW QUALITY PATCH
+   - Psychotest invitation follows saved WhatsApp template
+   - Professional interview report and print-ready PDF view
+   - Explicit HR adjudication for Perlu Review HR interview results
+   - Keeps Pipeline read-only and strict sequential workflow
+   ========================================================================== */
+(function(){
+  'use strict';
+
+  const e22=v=>typeof atsEsc==='function'?atsEsc(v):String(v??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[ch]));
+  const app22=id=>typeof getApplication==='function'?getApplication(id):(DB?.applications||[]).find(x=>x.application_id===id);
+  const cand22=id=>typeof getCandidate==='function'?getCandidate(id):(DB?.candidates||[]).find(x=>x.candidate_id===id);
+  const pos22=id=>typeof getPosition==='function'?getPosition(id):(DB?.positions||[]).find(x=>x.position_id===id);
+  const co22=id=>typeof getCompany==='function'?getCompany(id):(DB?.companies||[]).find(x=>x.company_id===id);
+  const fmt22=d=>{if(!d)return'-';try{return typeof formatDate==='function'?formatDate(d):new Date(d).toLocaleDateString('id-ID',{day:'2-digit',month:'short',year:'numeric'});}catch(_){return String(d);}};
+
+  function scorecards22(appId){
+    let rows=[];
+    try{if(typeof scorecardsFor==='function')rows=scorecardsFor(appId)||[];}catch(_){}
+    if(!rows.length)rows=(DB?.scorecards||[]).filter(x=>x.application_id===appId);
+    return [...rows].sort((a,b)=>new Date(b.created_at||b.assessed_at||0)-new Date(a.created_at||a.assessed_at||0));
+  }
+  function card22(appId,type){return scorecards22(appId).find(x=>x.interview_type===type)||null;}
+  function decision22(v){
+    const s=String(v||'').trim();
+    if(['Lanjut','Sangat Direkomendasikan','Direkomendasikan'].includes(s))return'Lanjut';
+    if(['Pertimbangkan','Perlu Review HR','Rekomendasikan Posisi Lain',''].includes(s))return'Perlu Review HR';
+    if(s==='Talent Pool')return'Talent Pool';
+    if(['Tidak Lanjut','Tidak Direkomendasikan'].includes(s))return'Tidak Lanjut';
+    return'Perlu Review HR';
+  }
+  function pct22(r){
+    const n=Number(r?.weighted_score??r?.score??0);
+    if(!Number.isFinite(n))return 0;
+    return Math.max(0,Math.min(100,n<=4.1?n*25:n));
+  }
+  function risk22(r){const n=(r?.red_flags||[]).length;return n>=3?'Tinggi':n>0?'Sedang':'Rendah';}
+  function tone22(v){
+    const s=decision22(v);
+    if(s==='Lanjut')return'emerald';
+    if(s==='Tidak Lanjut')return'red';
+    if(s==='Talent Pool')return'blue';
+    return'amber';
+  }
+  function badge22(v){
+    const t=tone22(v),m={emerald:'bg-emerald-50 text-emerald-700 border-emerald-200',red:'bg-red-50 text-red-700 border-red-200',blue:'bg-blue-50 text-blue-700 border-blue-200',amber:'bg-amber-50 text-amber-700 border-amber-200'};
+    return m[t]||m.amber;
+  }
+  function analysis22(r,c){
+    if(!r)return null;
+    let base=null;
+    try{base=r.analysis_json||(typeof buildInterviewAnalysis==='function'?buildInterviewAnalysis(r,c||{}):null);}catch(_){}
+    const items=Array.isArray(r.detail_json)?r.detail_json:[];
+    const strengths=(base?.strengths?.length?base.strengths:items.filter(x=>Number(x.score)>=3).sort((a,b)=>Number(b.score)-Number(a.score)).slice(0,5).map(x=>`${x.competency_name||'Kompetensi'}: ${x.score}/4${x.evidence?' - '+x.evidence:''}`));
+    const gaps=(base?.gaps?.length?base.gaps:items.filter(x=>Number(x.score)<=2).sort((a,b)=>Number(a.score)-Number(b.score)).slice(0,5).map(x=>`${x.competency_name||'Kompetensi'}: ${x.score}/4${x.evidence?' - '+x.evidence:''}`));
+    const flags=Array.isArray(r.red_flags)?r.red_flags:[];
+    const score=pct22(r).toFixed(1),dec=decision22(r.workflow_decision||r.recommendation),risk=risk22(r);
+    const topStrength=items.filter(x=>Number(x.score)>=3).sort((a,b)=>Number(b.score)-Number(a.score)).slice(0,2).map(x=>x.competency_name).filter(Boolean);
+    const topGap=items.filter(x=>Number(x.score)<=2).sort((a,b)=>Number(a.score)-Number(b.score)).slice(0,2).map(x=>x.competency_name).filter(Boolean);
+    let narrative=`Hasil ${r.interview_type||'interview'} mencatat skor ${score}/100 dengan rekomendasi ${r.recommendation||'-'}. `;
+    if(topStrength.length)narrative+=`Kekuatan yang paling terlihat berada pada ${topStrength.join(' dan ')}. `;
+    if(topGap.length)narrative+=`Area yang masih perlu pendalaman adalah ${topGap.join(' dan ')}. `;
+    if(flags.length)narrative+=`Terdapat ${flags.length} red flag sehingga klarifikasi dan bukti pendukung perlu menjadi perhatian. `;
+    else narrative+='Tidak ada red flag yang dicentang pada scorecard ini. ';
+    if(dec==='Perlu Review HR')narrative+='Keputusan workflow belum final dan memerlukan review HR sebelum kandidat dapat melanjutkan.';
+    if(dec==='Lanjut')narrative+='Keputusan workflow saat ini adalah Lanjut sehingga kandidat dapat masuk ke tahap berikutnya sesuai gate sistem.';
+    if(dec==='Talent Pool')narrative+='Kandidat diarahkan ke Talent Pool dan tidak dilanjutkan pada lowongan ini.';
+    if(dec==='Tidak Lanjut')narrative+='Keputusan workflow saat ini adalah Tidak Lanjut.';
+    return{
+      summary:base?.summary||narrative,
+      narrative,
+      strengths:strengths.length?strengths:['Belum ada kekuatan yang cukup terdokumentasi dari scorecard.'],
+      gaps:gaps.length?gaps:['Tidak ada kompetensi dengan skor 1-2 yang tercatat.'],
+      flags,
+      risk,
+      decision:dec,
+      score:Number(score),
+      recommendation:r.recommendation||'-',
+      cv:r.cv_background_notes||base?.cv_consistency||'Belum ada catatan verifikasi konsistensi CV.',
+      notes:r.notes||r.conclusion||'',
+      reviewNotes:r.workflow_review_notes||'',
+      reviewedBy:r.workflow_reviewed_by||'',
+      reviewedAt:r.workflow_reviewed_at||null
+    };
+  }
+
+  function profileGrid22(c){
+    const cells=[
+      ['Pendidikan',c?.education],['Domisili',c?.city],['Pengalaman',c?.experience],['Posisi terakhir',c?.last_role],['Perusahaan terakhir',c?.last_company],['Alasan melamar',c?.apply_reason]
+    ].filter(x=>x[1]);
+    return cells.length?`<div class="grid grid-cols-1 md:grid-cols-3 gap-2 mt-4">${cells.map(([k,v])=>`<div class="rounded-lg bg-slate-50 p-3"><div class="text-[10px] uppercase tracking-wide text-slate-400">${e22(k)}</div><div class="text-sm font-medium mt-1">${e22(v)}</div></div>`).join('')}</div>`:'';
+  }
+
+  function stageReport22(r,c){
+    if(!r)return'';
+    const a=analysis22(r,c),items=Array.isArray(r.detail_json)?r.detail_json:[],first=Array.isArray(r.first_impression)?r.first_impression:[];
+    const review=a.reviewedAt?`<div class="mt-3 rounded-lg bg-indigo-50 border border-indigo-100 p-3 text-xs"><b>Review workflow:</b> ${e22(a.decision)}${a.reviewedBy?' oleh '+e22(a.reviewedBy):''}${a.reviewedAt?' pada '+e22(fmt22(a.reviewedAt)):''}${a.reviewNotes?`<div class="mt-1">${e22(a.reviewNotes)}</div>`:''}</div>`:'';
+    return `<section class="bg-white border border-slate-200 rounded-xl overflow-hidden">
+      <div class="p-5 border-b bg-slate-50 flex flex-col md:flex-row md:items-center justify-between gap-3">
+        <div><div class="text-xs uppercase tracking-wider text-slate-400">Tahap Seleksi</div><h4 class="font-bold text-lg">${e22(r.interview_type||'Interview')}</h4><div class="text-xs text-slate-500 mt-1">Interviewer: ${e22(r.interviewer||'-')} | ${e22(fmt22(r.assessed_at||r.created_at))}</div></div>
+        <div class="flex items-center gap-3"><div class="text-right"><div class="text-3xl font-black text-slate-900">${a.score.toFixed(1)}</div><div class="text-[10px] uppercase text-slate-400">Skor /100</div></div><span class="px-3 py-1.5 rounded-full border text-xs font-bold ${badge22(a.decision)}">${e22(a.decision)}</span></div>
+      </div>
+      <div class="p-5 space-y-5">
+        <div class="rounded-xl bg-slate-900 text-white p-4"><div class="text-[10px] uppercase tracking-widest text-slate-300">Ringkasan Analisis</div><p class="text-sm leading-6 mt-2">${e22(a.narrative)}</p></div>
+        <div class="grid md:grid-cols-3 gap-3">
+          <div class="rounded-xl border border-emerald-100 bg-emerald-50 p-4"><div class="text-xs font-bold text-emerald-700">Kekuatan Utama</div><ul class="mt-2 space-y-1 text-xs text-emerald-900">${a.strengths.map(x=>`<li>- ${e22(x)}</li>`).join('')}</ul></div>
+          <div class="rounded-xl border border-amber-100 bg-amber-50 p-4"><div class="text-xs font-bold text-amber-700">Gap / Pendalaman</div><ul class="mt-2 space-y-1 text-xs text-amber-900">${a.gaps.map(x=>`<li>- ${e22(x)}</li>`).join('')}</ul></div>
+          <div class="rounded-xl border ${a.risk==='Tinggi'?'border-red-100 bg-red-50':a.risk==='Sedang'?'border-orange-100 bg-orange-50':'border-slate-200 bg-slate-50'} p-4"><div class="text-xs font-bold">Risk & Red Flag: ${e22(a.risk)}</div><ul class="mt-2 space-y-1 text-xs">${a.flags.length?a.flags.map(x=>`<li>- ${e22(x)}</li>`).join(''):'<li>- Tidak ada red flag dicentang</li>'}</ul>${r.red_flag_notes?`<div class="mt-2 text-xs"><b>Klarifikasi:</b> ${e22(r.red_flag_notes)}</div>`:''}</div>
+        </div>
+        <div class="grid md:grid-cols-2 gap-3">
+          <div class="border rounded-xl p-4"><div class="text-xs font-bold text-slate-700">Verifikasi CV / Profil</div><p class="text-xs leading-5 text-slate-600 mt-2">${e22(a.cv)}</p></div>
+          <div class="border rounded-xl p-4"><div class="text-xs font-bold text-slate-700">Catatan / Kesimpulan Interviewer</div><p class="text-xs leading-5 text-slate-600 mt-2">${e22(a.notes||'Belum ada catatan kesimpulan tambahan.')}</p></div>
+        </div>
+        ${first.length?`<div><div class="text-xs font-bold text-slate-700 mb-2">First Impression & Observation</div><div class="grid md:grid-cols-3 gap-2">${first.map(x=>`<div class="border rounded-lg p-3"><div class="text-xs font-semibold">${e22(x.name||'-')}</div><div class="text-lg font-bold mt-1">${e22(x.score||0)}/4</div>${x.note?`<div class="text-[11px] text-slate-500 mt-1">${e22(x.note)}</div>`:''}</div>`).join('')}</div></div>`:''}
+        ${items.length?`<div><div class="text-xs font-bold text-slate-700 mb-2">Evidence Kompetensi</div><div class="overflow-x-auto border rounded-xl"><table class="w-full text-xs"><thead class="bg-slate-50"><tr><th class="text-left px-3 py-2">Kompetensi</th><th class="text-center px-3 py-2">Skor</th><th class="text-left px-3 py-2">Evidence</th></tr></thead><tbody>${items.map(x=>`<tr class="border-t"><td class="px-3 py-2 font-medium">${e22(x.competency_name||'-')}</td><td class="px-3 py-2 text-center font-bold">${e22(x.score||0)}/4</td><td class="px-3 py-2 text-slate-600">${e22(x.evidence||'-')}</td></tr>`).join('')}</tbody></table></div></div>`:''}
+        ${review}
+      </div>
+    </section>`;
+  }
+
+  function reportData22(appId){
+    const app=app22(appId),c=cand22(app?.candidate_id),p=pos22(app?.position_id),co=co22(app?.company_id),hr=card22(appId,'Interview HR'),user=card22(appId,'Interview User');
+    if(!app||!c)return null;
+    return{app,c,p,co,hr,user,hrA:hr?analysis22(hr,c):null,userA:user?analysis22(user,c):null};
+  }
+
+  function combinedNarrative22(d){
+    if(!d.hr&&!d.user)return'Belum ada hasil interview yang tersimpan.';
+    if(d.hr&&!d.user){
+      return `Interview HR telah selesai dengan skor ${d.hrA.score.toFixed(1)}/100 dan keputusan ${d.hrA.decision}. Interview User belum tersedia. ${d.hrA.decision==='Perlu Review HR'?'HR perlu menetapkan keputusan workflow sebelum kandidat dapat dijadwalkan ke Interview User.':''}`;
+    }
+    const avg=((d.hrA.score+d.userA.score)/2).toFixed(1);
+    return `Interview HR mencatat ${d.hrA.score.toFixed(1)}/100 (${d.hrA.decision}) dan Interview User ${d.userA.score.toFixed(1)}/100 (${d.userA.decision}). Rata-rata dua tahap ${avg}/100. Keputusan recruitment mengikuti hasil workflow tahap terbaru dan tetap harus mempertimbangkan evidence, red flag, serta catatan interviewer.`;
+  }
+
+  function reportBody22(appId){
+    const d=reportData22(appId);if(!d)return'';
+    return `<div id="v22InterviewReport" class="space-y-5">
+      <div class="rounded-2xl overflow-hidden border border-slate-200 bg-white">
+        <div class="bg-slate-900 text-white p-6"><div class="text-[10px] uppercase tracking-[.22em] text-slate-300">Recruitment Assessment Report</div><div class="flex flex-col md:flex-row md:items-end justify-between gap-4 mt-2"><div><h2 class="text-2xl font-black">${e22(d.c.candidate_name||'-')}</h2><div class="text-sm text-slate-300 mt-1">${e22(d.p?.position_name||'-')} | ${e22(d.co?.brand||d.co?.company_name||'-')}</div></div><div class="text-xs text-slate-300">Application ${e22(d.app.application_id)}</div></div></div>
+        <div class="p-5"><div class="grid grid-cols-1 md:grid-cols-3 gap-3"><div class="rounded-xl bg-slate-50 p-4"><div class="text-[10px] uppercase text-slate-400">Tahap Saat Ini</div><div class="font-bold mt-1">${e22(d.app.current_stage||'-')}</div></div><div class="rounded-xl bg-slate-50 p-4"><div class="text-[10px] uppercase text-slate-400">Interview HR</div><div class="font-bold mt-1">${d.hr?`${d.hrA.score.toFixed(1)}/100 | ${e22(d.hrA.decision)}`:'Belum ada hasil'}</div></div><div class="rounded-xl bg-slate-50 p-4"><div class="text-[10px] uppercase text-slate-400">Interview User</div><div class="font-bold mt-1">${d.user?`${d.userA.score.toFixed(1)}/100 | ${e22(d.userA.decision)}`:'Belum ada hasil'}</div></div></div>${profileGrid22(d.c)}</div>
+      </div>
+      <div class="rounded-xl border border-indigo-100 bg-indigo-50 p-5"><div class="text-xs font-bold text-indigo-700">Kesimpulan Terintegrasi</div><p class="text-sm leading-6 text-indigo-950 mt-2">${e22(combinedNarrative22(d))}</p><p class="text-[11px] text-indigo-600 mt-2">Analisa ini dirangkum dari skor, evidence, red flag, verifikasi CV, dan catatan scorecard yang tersimpan. Sistem tidak menambahkan fakta di luar data interview.</p></div>
+      ${stageReport22(d.hr,d.c)}
+      ${stageReport22(d.user,d.c)}
+    </div>`;
+  }
+
+  function resetModal22(){const m=document.getElementById('modalContent');if(m)m.className='bg-white rounded-xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto';}
+  function closeReport22(){if(typeof closeModal==='function')closeModal();resetModal22();}
+
+  function viewInterviewResult22(appId){
+    const d=reportData22(appId);if(!d)return showToast('Data kandidat tidak ditemukan','danger');
+    if(!d.hr&&!d.user)return showToast('Belum ada hasil interview tersimpan','warning');
+    const m=document.getElementById('modalContent');if(m)m.className='bg-slate-50 rounded-2xl shadow-2xl w-full max-w-6xl max-h-[94vh] overflow-y-auto';
+    const hrReview=d.hr&&d.hrA.decision==='Perlu Review HR'&&d.app.current_stage==='Interview HR';
+    const userReview=d.user&&d.userA.decision==='Perlu Review HR'&&d.app.current_stage==='Interview User';
+    const nextHr=d.hr&&d.hrA.decision==='Lanjut'&&d.app.current_stage==='Interview HR';
+    openModal(`<div class="p-5 md:p-6"><div class="flex flex-col md:flex-row md:items-center justify-between gap-3 mb-5"><div><h3 class="font-bold text-xl">Laporan Hasil Interview</h3><p class="text-xs text-slate-500 mt-1">Tampilan terintegrasi HR + User dan analisa berbasis evidence.</p></div><div class="flex flex-wrap gap-2"><button onclick="downloadInterviewReport('${e22(appId)}')" class="px-3 py-2 bg-slate-900 text-white rounded-lg text-sm"><i class="fas fa-print mr-1"></i>Cetak / Simpan PDF</button>${hrReview?`<button onclick="openInterviewReviewV22('${e22(appId)}','Interview HR')" class="px-3 py-2 bg-amber-500 text-white rounded-lg text-sm">Review Keputusan HR</button>`:''}${userReview?`<button onclick="openInterviewReviewV22('${e22(appId)}','Interview User')" class="px-3 py-2 bg-amber-500 text-white rounded-lg text-sm">Review Keputusan User</button>`:''}${nextHr?`<button onclick="closeReportV22();openInterviewModal('${e22(appId)}','Interview User')" class="px-3 py-2 bg-emerald-600 text-white rounded-lg text-sm">Jadwalkan Interview User</button>`:''}<button onclick="closeReportV22()" class="px-3 py-2 border bg-white rounded-lg text-sm">Tutup</button></div></div>${reportBody22(appId)}</div>`);
+  }
+
+  function printCss22(){return `
+    @page{size:A4;margin:14mm}*{box-sizing:border-box}body{font-family:Arial,Helvetica,sans-serif;color:#0f172a;margin:0;font-size:11px;line-height:1.45}.page{max-width:900px;margin:0 auto}.head{background:#0f172a;color:white;padding:22px;border-radius:12px}.eyebrow{text-transform:uppercase;letter-spacing:.18em;font-size:9px;color:#cbd5e1}.title{font-size:24px;font-weight:800;margin:5px 0}.sub{color:#cbd5e1}.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.card{border:1px solid #e2e8f0;border-radius:10px;padding:12px;margin-top:10px}.soft{background:#f8fafc}.section{margin-top:14px;border:1px solid #e2e8f0;border-radius:12px;overflow:hidden;page-break-inside:avoid}.section-head{padding:14px;background:#f8fafc;border-bottom:1px solid #e2e8f0;display:flex;justify-content:space-between}.score{font-size:26px;font-weight:800}.analysis{background:#0f172a;color:white;border-radius:9px;padding:12px;margin:12px}.cols{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:0 12px 12px}.box{border:1px solid #e2e8f0;border-radius:9px;padding:10px}.green{background:#ecfdf5}.amber{background:#fffbeb}.red{background:#fef2f2}.blue{background:#eff6ff}.summary{background:#eef2ff;border:1px solid #c7d2fe;border-radius:10px;padding:12px;margin-top:12px}table{width:100%;border-collapse:collapse}th,td{border:1px solid #e2e8f0;padding:6px;text-align:left}th{background:#f8fafc}.small{font-size:9px;color:#64748b}.badge{display:inline-block;border:1px solid #cbd5e1;border-radius:999px;padding:4px 8px;font-weight:700}.footer{margin-top:16px;color:#64748b;font-size:9px}@media print{button{display:none!important}.section{break-inside:avoid}}`}
+  function printStage22(r,c){
+    if(!r)return'';const a=analysis22(r,c),items=Array.isArray(r.detail_json)?r.detail_json:[],first=Array.isArray(r.first_impression)?r.first_impression:[];
+    return `<div class="section"><div class="section-head"><div><b>${e22(r.interview_type||'Interview')}</b><div class="small">${e22(r.interviewer||'-')} | ${e22(fmt22(r.assessed_at||r.created_at))}</div></div><div><span class="score">${a.score.toFixed(1)}</span> /100 <span class="badge">${e22(a.decision)}</span></div></div><div class="analysis"><b>Ringkasan Analisis</b><div style="margin-top:6px">${e22(a.narrative)}</div></div><div class="cols"><div class="box green"><b>Kekuatan</b><ul>${a.strengths.map(x=>`<li>${e22(x)}</li>`).join('')}</ul></div><div class="box amber"><b>Gap / Pendalaman</b><ul>${a.gaps.map(x=>`<li>${e22(x)}</li>`).join('')}</ul></div><div class="box"><b>Verifikasi CV / Profil</b><div>${e22(a.cv)}</div></div><div class="box ${a.flags.length?'red':''}"><b>Red Flag - Risiko ${e22(a.risk)}</b><ul>${a.flags.length?a.flags.map(x=>`<li>${e22(x)}</li>`).join(''):'<li>Tidak ada red flag dicentang</li>'}</ul></div></div>${first.length?`<div class="card"><b>First Impression</b><table style="margin-top:6px"><tr><th>Aspek</th><th>Skor</th><th>Catatan</th></tr>${first.map(x=>`<tr><td>${e22(x.name||'-')}</td><td>${e22(x.score||0)}/4</td><td>${e22(x.note||'-')}</td></tr>`).join('')}</table></div>`:''}${items.length?`<div class="card"><b>Evidence Kompetensi</b><table style="margin-top:6px"><tr><th>Kompetensi</th><th>Skor</th><th>Evidence</th></tr>${items.map(x=>`<tr><td>${e22(x.competency_name||'-')}</td><td>${e22(x.score||0)}/4</td><td>${e22(x.evidence||'-')}</td></tr>`).join('')}</table></div>`:''}${a.notes?`<div class="card"><b>Kesimpulan Interviewer</b><div style="margin-top:5px">${e22(a.notes)}</div></div>`:''}${a.reviewedAt?`<div class="card blue"><b>Review Workflow</b><div style="margin-top:5px">Keputusan: ${e22(a.decision)}${a.reviewedBy?' | Reviewer: '+e22(a.reviewedBy):''}${a.reviewNotes?' | Catatan: '+e22(a.reviewNotes):''}</div></div>`:''}</div>`;
+  }
+  function printInterviewReport22(appId){
+    const d=reportData22(appId);if(!d||(!d.hr&&!d.user))return showToast('Belum ada hasil interview','warning');
+    const w=window.open('','_blank','noopener,noreferrer');if(!w)return showToast('Popup diblokir browser. Izinkan popup untuk mencetak laporan.','warning');
+    const profile=[['Pendidikan',d.c.education],['Domisili',d.c.city],['Pengalaman',d.c.experience],['Posisi terakhir',d.c.last_role],['Perusahaan terakhir',d.c.last_company],['Alasan melamar',d.c.apply_reason]].filter(x=>x[1]);
+    const html=`<!doctype html><html><head><meta charset="utf-8"><title>Laporan Interview - ${e22(d.c.candidate_name||'Kandidat')}</title><style>${printCss22()}</style></head><body><div class="page"><div class="head"><div class="eyebrow">Recruitment Assessment Report</div><div class="title">${e22(d.c.candidate_name||'-')}</div><div class="sub">${e22(d.p?.position_name||'-')} | ${e22(d.co?.brand||d.co?.company_name||'-')} | ${e22(d.app.application_id)}</div></div>${profile.length?`<div class="grid">${profile.map(([k,v])=>`<div class="card soft"><div class="small">${e22(k)}</div><b>${e22(v)}</b></div>`).join('')}</div>`:''}<div class="summary"><b>Kesimpulan Terintegrasi</b><div style="margin-top:5px">${e22(combinedNarrative22(d))}</div></div>${printStage22(d.hr,d.c)}${printStage22(d.user,d.c)}<div class="footer">Dokumen internal rekrutmen. Analisa dirangkum dari data scorecard yang tersimpan dan bukan fakta tambahan di luar hasil interview.</div></div><script>setTimeout(function(){window.print();},350);<\/script></body></html>`;
+    w.document.open();w.document.write(html);w.document.close();
+  }
+
+  function openInterviewReview22(appId,type){
+    const d=reportData22(appId),r=type==='Interview User'?d?.user:d?.hr;if(!d||!r)return showToast('Hasil interview belum tersedia','warning');
+    const a=analysis22(r,d.c),expectedStage=type;
+    if(d.app.current_stage!==expectedStage)return showToast(`Review ${type} hanya dapat dilakukan saat kandidat berada di tahap ${expectedStage}.`,'warning');
+    const m=document.getElementById('modalContent');if(m)m.className='bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[92vh] overflow-y-auto';
+    openModal(`<div class="p-6"><div class="flex justify-between gap-3"><div><div class="text-[10px] uppercase tracking-wider text-slate-400">Adjudikasi Workflow</div><h3 class="font-bold text-xl">Review Keputusan ${e22(type)}</h3><p class="text-xs text-slate-500 mt-1">Rekomendasi scorecard: <b>${e22(r.recommendation||'-')}</b> | Skor <b>${a.score.toFixed(1)}/100</b></p></div><button onclick="closeInterviewReviewV22()" class="text-slate-400">X</button></div><div class="mt-4 rounded-xl bg-amber-50 border border-amber-100 p-4"><div class="text-xs font-bold text-amber-800">Mengapa perlu review?</div><p class="text-xs leading-5 text-amber-900 mt-1">Hasil scorecard belum menghasilkan keputusan workflow final. HR harus menetapkan keputusan dengan catatan agar tahapan berikutnya dapat dibuka secara audit-friendly.</p></div><div class="grid md:grid-cols-2 gap-3 mt-4"><div class="border rounded-xl p-4"><div class="text-xs font-bold text-emerald-700">Kekuatan</div><ul class="text-xs mt-2 space-y-1">${a.strengths.map(x=>`<li>- ${e22(x)}</li>`).join('')}</ul></div><div class="border rounded-xl p-4"><div class="text-xs font-bold text-amber-700">Gap / Risiko</div><ul class="text-xs mt-2 space-y-1">${a.gaps.map(x=>`<li>- ${e22(x)}</li>`).join('')}</ul>${a.flags.length?`<div class="text-xs text-red-700 mt-2"><b>Red flag:</b> ${a.flags.map(e22).join(' | ')}</div>`:''}</div></div><label class="block text-xs font-semibold text-slate-600 mt-4">Catatan keputusan HR *</label><textarea id="v22InterviewReviewNotes" rows="4" class="w-full border rounded-xl p-3 text-sm mt-1" placeholder="Tuliskan alasan keputusan berdasarkan evidence, gap, red flag, atau hasil klarifikasi...">${e22(r.workflow_review_notes||'')}</textarea><div class="grid grid-cols-1 sm:grid-cols-4 gap-2 mt-4"><button onclick="saveInterviewReviewV22('${e22(appId)}','${e22(type)}','Lanjut')" class="px-3 py-2.5 bg-emerald-600 text-white rounded-lg text-sm font-semibold">Lanjut</button><button onclick="saveInterviewReviewV22('${e22(appId)}','${e22(type)}','Perlu Review HR')" class="px-3 py-2.5 bg-amber-500 text-white rounded-lg text-sm font-semibold">Tetap Review</button><button onclick="saveInterviewReviewV22('${e22(appId)}','${e22(type)}','Talent Pool')" class="px-3 py-2.5 bg-blue-600 text-white rounded-lg text-sm font-semibold">Talent Pool</button><button onclick="saveInterviewReviewV22('${e22(appId)}','${e22(type)}','Tidak Lanjut')" class="px-3 py-2.5 bg-red-600 text-white rounded-lg text-sm font-semibold">Tidak Lanjut</button></div><div class="mt-4 flex justify-between"><button onclick="viewInterviewResultV22('${e22(appId)}')" class="text-xs text-primary-700 font-semibold">Lihat laporan lengkap</button><button onclick="closeInterviewReviewV22()" class="px-3 py-2 border rounded-lg text-sm">Batal</button></div></div>`);
+  }
+  function closeInterviewReview22(){if(typeof closeModal==='function')closeModal();resetModal22();}
+  async function saveInterviewReview22(appId,type,decision){
+    const notes=document.getElementById('v22InterviewReviewNotes')?.value?.trim()||'';
+    if(decision!=='Perlu Review HR'&&!notes)return showToast('Catatan keputusan wajib diisi untuk keputusan final.','warning');
+    const {data,error}=await sb.rpc('review_interview_result',{p_application_id:appId,p_interview_type:type,p_decision:decision,p_notes:notes||null});
+    if(error)return showToast('Gagal menyimpan review interview: '+error.message,'danger');
+    if(typeof loadFromSupabase==='function')await loadFromSupabase();
+    closeInterviewReview22();
+    if(typeof renderSelectionQueueV21==='function'&&typeof currentPage!=='undefined'&&currentPage==='selection-queue')renderSelectionQueueV21(false);
+    const app=app22(appId);if(typeof currentPage!=='undefined'&&currentPage==='candidate-detail'&&app&&typeof viewCandidateDetail==='function')setTimeout(()=>viewCandidateDetail(app.candidate_id,appId),50);
+    const next=data?.next_action?` | Next: ${data.next_action}`:'';
+    showToast(`Keputusan ${type}: ${decision}${next}`,'success');
+  }
+
+  Object.assign(window,{
+    viewInterviewResult:viewInterviewResult22,
+    viewInterviewResultV22:viewInterviewResult22,
+    downloadInterviewReport:printInterviewReport22,
+    printInterviewReportV22:printInterviewReport22,
+    openInterviewReviewV22:openInterviewReview22,
+    saveInterviewReviewV22:saveInterviewReview22,
+    closeInterviewReviewV22:closeInterviewReview22,
+    closeReportV22:closeReport22
+  });
+
+  console.log('%cRecruitment ATS V2.2 Workflow Quality active','color:#0f766e;font-weight:bold');
 })();
