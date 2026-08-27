@@ -2085,10 +2085,14 @@ Tim Rekrutmen {brand}`
 
   function decorateButtons24(){
     document.querySelectorAll('[onclick*="downloadCandidatePackage"]').forEach(el=>{
+      if(el.dataset.v24UnifiedDecorated==='1') return;
+      el.dataset.v24UnifiedDecorated='1';
       el.innerHTML='<i class="fas fa-file-pdf mr-1"></i>Preview Laporan Gabungan';
       el.title='Preview laporan kandidat sebelum download';
     });
     document.querySelectorAll('[onclick*="downloadInterviewReport"]').forEach(el=>{
+      if(el.dataset.v24InterviewDecorated==='1') return;
+      el.dataset.v24InterviewDecorated='1';
       el.innerHTML='<i class="fas fa-file-pdf mr-1"></i>Preview Laporan PDF';
       el.title='Preview Candidate Assessment Report';
     });
