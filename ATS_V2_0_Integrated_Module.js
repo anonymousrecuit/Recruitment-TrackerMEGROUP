@@ -246,3 +246,341 @@
   document.addEventListener('DOMContentLoaded',()=>setTimeout(()=>Promise.all([loadPsych(true),loadScreening(true)]).then(()=>{if(typeof renderAll==='function')renderAll();}),1200));
   console.log('%cRecruitment ATS V2.0 Integrated Module loaded','color:#2563eb;font-weight:bold');
 })();
+
+/* ========================================================================== 
+   RECRUITMENT ATS V2.1 - UX SIMPLIFICATION EXTENSION
+   Drop-in extension for V2.0 module. No database migration required.
+
+   UX principles:
+   - Pipeline = read-only visibility, never a stage-moving surface.
+   - One operational menu = Antrian Seleksi.
+   - Candidate Detail = one context-aware Next Action.
+   - Screening/Psikotes/Interview/Offering remain fully functional, but are
+     reached from the queue/detail instead of separate sidebar menus.
+   ========================================================================== */
+(function(){
+  'use strict';
+
+  const V21={
+    activeTab:'screening',
+    screeningRows:[],
+    psychSessions:[],
+    loading:false,
+    loadedAt:null,
+    detailAppId:null,
+    refreshTimer:null
+  };
+
+  const h=v=>typeof atsEsc==='function'?atsEsc(v):String(v??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[ch]));
+  const scopedApps=()=>{try{return typeof scopeByCompany==='function'?scopeByCompany(DB?.applications||[]):DB?.applications||[];}catch(_){return DB?.applications||[];}};
+  const appById21=id=>typeof getApplication==='function'?getApplication(id):(DB?.applications||[]).find(x=>x.application_id===id);
+  const candById21=id=>typeof getCandidate==='function'?getCandidate(id):(DB?.candidates||[]).find(x=>x.candidate_id===id);
+  const posById21=id=>typeof getPosition==='function'?getPosition(id):(DB?.positions||[]).find(x=>x.position_id===id);
+  const coById21=id=>typeof getCompany==='function'?getCompany(id):(DB?.companies||[]).find(x=>x.company_id===id);
+
+  function installCss(){
+    if(document.getElementById('ats-v21-ux-css'))return;
+    const s=document.createElement('style');s.id='ats-v21-ux-css';s.textContent=`
+      .candidate-card{cursor:pointer!important}.candidate-card.dragging{opacity:1!important}
+      .v21-readonly-pipeline .kanban-col{outline:none!important}.v21-readonly-pipeline .candidate-card{user-select:text}
+      .v21-tab-btn{transition:.15s ease}.v21-tab-btn.active{background:var(--brand,#2563eb);color:#fff;border-color:var(--brand,#2563eb)}
+      .v21-next-card{box-shadow:0 8px 24px -18px rgba(15,23,42,.45)}
+      .v21-overflow{position:relative}.v21-overflow-menu{position:absolute;right:0;top:calc(100% + 6px);z-index:60;min-width:190px;background:#fff;border:1px solid #e2e8f0;border-radius:12px;box-shadow:0 18px 40px -18px rgba(15,23,42,.35);padding:6px}
+      .v21-overflow-menu>button{display:block;width:100%;text-align:left;padding:8px 10px;border-radius:8px;font-size:12px}.v21-overflow-menu>button:hover{background:#f8fafc}
+      .v21-task-row:hover{background:#f8fafc}
+    `;document.head.appendChild(s);
+  }
+
+  function hideLegacyWorkflowNav(){
+    ['screening-workbench','psychotests','interviews','offerings'].forEach(page=>{
+      const n=document.querySelector(`.nav-item[data-page="${page}"]`);if(n){n.style.display='none';n.setAttribute('aria-hidden','true');n.dataset.v21Hidden='1';}
+    });
+  }
+
+  function injectSelectionQueueUi(){
+    installCss();hideLegacyWorkflowNav();
+    let nav=document.querySelector('.nav-item[data-page="selection-queue"]');
+    if(!nav){
+      const cand=document.querySelector('.nav-item[data-page="candidates"]');
+      nav=document.createElement('a');nav.href='#';nav.className='nav-item flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium';nav.dataset.page='selection-queue';
+      nav.innerHTML='<i class="fas fa-list-check w-5 text-center"></i><span class="nav-text">Antrian Seleksi</span><span id="navBadgeSelectionV21" class="nav-text ml-auto hidden min-w-[1.25rem] h-5 px-1.5 rounded-full bg-amber-500 text-white text-[10px] font-bold flex items-center justify-center"></span>';
+      nav.addEventListener('click',e=>{e.preventDefault();navigate('selection-queue');});
+      cand?.insertAdjacentElement('afterend',nav);
+    }
+    if(!document.getElementById('page-selection-queue')){
+      const anchor=document.getElementById('page-candidates')||document.getElementById('page-pipeline');
+      const p=document.createElement('div');p.id='page-selection-queue';p.className='page';
+      anchor?.insertAdjacentElement('afterend',p);
+    }
+  }
+
+  async function loadQueueData(silent=true){
+    if(V21.loading)return;V21.loading=true;
+    try{
+      const [scr,psy]=await Promise.all([
+        sb.rpc('list_screening_workbench'),
+        sb.rpc('list_psychotest_sessions')
+      ]);
+      if(scr.error)throw scr.error;if(psy.error)throw psy.error;
+      V21.screeningRows=Array.isArray(scr.data)?scr.data:(scr.data?[scr.data]:[]);
+      V21.psychSessions=Array.isArray(psy.data)?psy.data:(psy.data?[psy.data]:[]);
+      V21.loadedAt=new Date();
+    }catch(e){if(!silent&&typeof showToast==='function')showToast('Antrian belum dapat dimuat: '+(e.message||e),'warning');console.warn('ATS V2.1 queue load',e);}
+    finally{V21.loading=false;}
+  }
+
+  function screeningFor(appId){return (V21.screeningRows||[]).find(x=>x.application_id===appId)||null;}
+  function psychFor(appId){return (V21.psychSessions||[]).filter(x=>x.application_id===appId).sort((a,b)=>Number(b.attempt_no||0)-Number(a.attempt_no||0))[0]||null;}
+  function scheduled21(appId,type){
+    try{if(typeof scheduledInterview==='function')return scheduledInterview(appId,type);}catch(_){}
+    return (DB?.interviews||[]).filter(i=>i.application_id===appId&&i.interview_type===type&&i.date).sort((a,b)=>new Date(b.date||0)-new Date(a.date||0))[0]||null;
+  }
+  function scorecard21(appId,type){
+    try{if(typeof scorecardsFor==='function')return (scorecardsFor(appId)||[]).find(x=>x.interview_type===type)||null;}catch(_){}
+    return (DB?.scorecards||[]).filter(x=>x.application_id===appId&&x.interview_type===type).sort((a,b)=>new Date(b.assessed_at||b.created_at||0)-new Date(a.assessed_at||a.created_at||0))[0]||null;
+  }
+  function link21(appId,type='Interview User'){
+    try{if(typeof latestInterviewLink==='function')return latestInterviewLink(appId,type);}catch(_){}
+    return (DB?.interview_links||[]).filter(x=>x.application_id===appId&&x.interview_type===type&&x.status!=='Dicabut').sort((a,b)=>new Date(b.created_at||0)-new Date(a.created_at||0))[0]||null;
+  }
+  function offering21(appId){return (DB?.offerings||[]).filter(x=>x.application_id===appId).sort((a,b)=>new Date(b.offer_date||b.created_at||0)-new Date(a.offer_date||a.created_at||0))[0]||null;}
+
+  function interviewDecision(rec){
+    const v=String(rec||'').trim();if(!v)return'Perlu Review HR';
+    if(['Lanjut','Sangat Direkomendasikan','Direkomendasikan'].includes(v))return'Lanjut';
+    if(v==='Pertimbangkan'||v==='Perlu Review HR'||v==='Rekomendasikan Posisi Lain')return'Perlu Review HR';
+    if(v==='Talent Pool')return'Talent Pool';
+    if(v==='Tidak Lanjut'||v==='Tidak Direkomendasikan')return'Tidak Lanjut';
+    return'Perlu Review HR';
+  }
+
+  function taskState(app){
+    if(!app)return null;
+    const appId=app.application_id,stage=app.current_stage||'Lamaran Masuk',status=app.status||'Aktif';
+    const terminal=status==='Tidak Lanjut'||status==='Diterima'||['Tidak Lanjut','Diterima','Talent Pool'].includes(stage);
+    if(terminal){return{tab:null,stage,processStatus:status,decision:status,action:null,label:null,tone:'slate'};}
+
+    if(['Lamaran Masuk','Screening CV','Screening HR'].includes(stage)){
+      const s=screeningFor(appId);
+      if(!s)return{tab:'screening',stage,processStatus:'Belum dievaluasi',decision:'Belum Ada',action:'screen-evaluate',label:'Evaluasi Screening',tone:'blue'};
+      const dec=s.review_decision||s.screening_status||'Belum Ada';
+      if(s.screening_status==='Perlu Review HR'&&!s.review_decision)return{tab:'screening',stage,processStatus:'Menunggu review HR',decision:'Perlu Review HR',action:'screen-review',label:'Review Screening',tone:'amber'};
+      if(s.screening_status==='Tidak Lolos Otomatis'||s.review_decision==='Tidak Lanjut')return{tab:'screening',stage,processStatus:'Selesai',decision:'Tidak Lanjut',action:null,label:null,tone:'red'};
+      if(s.screening_status==='Lolos Otomatis'||s.review_decision==='Lanjut')return{tab:'screening',stage,processStatus:'Screening selesai',decision:'Lanjut',action:'screen-advance',label:'Lanjut ke Psikotes',tone:'emerald'};
+      return{tab:'screening',stage,processStatus:'Perlu verifikasi',decision:dec,action:'screen-evaluate',label:'Evaluasi Ulang Screening',tone:'amber'};
+    }
+
+    if(stage==='Psikotes'){
+      const p=psychFor(appId);
+      if(!p)return{tab:'psych',stage,processStatus:'Belum ada akses',decision:'Belum Ada',action:'psych-create',label:'Generate Akses Psikotes',tone:'blue'};
+      if(['Belum Dimulai','Dalam Proses'].includes(p.status))return{tab:'psych',stage,processStatus:p.status,decision:p.workflow_decision||'Belum Ada',action:'psych-access',label:p.status==='Belum Dimulai'?'Lihat Akses Psikotes':'Lihat Status Psikotes',tone:p.status==='Dalam Proses'?'blue':'slate'};
+      if(['Kedaluwarsa','Dibatalkan'].includes(p.status))return{tab:'psych',stage,processStatus:p.status,decision:'Perlu Akses Baru',action:'psych-create',label:'Buat Akses Psikotes Baru',tone:'red'};
+      if(p.status==='Selesai'&&(!p.workflow_decision||p.workflow_decision==='Perlu Review HR'))return{tab:'psych',stage,processStatus:'Selesai dikerjakan',decision:'Perlu Review HR',action:'psych-review',label:'Review Hasil Psikotes',tone:'amber'};
+      if(p.status==='Selesai'&&p.workflow_decision==='Lanjut')return{tab:'psych',stage,processStatus:'Selesai dikerjakan',decision:'Lanjut',action:'hr-schedule',label:'Jadwalkan Interview HR',tone:'emerald'};
+      if(p.workflow_decision==='Tidak Lanjut')return{tab:'psych',stage,processStatus:'Selesai',decision:'Tidak Lanjut',action:'reject-finalize',label:'Finalisasi Tidak Lanjut',tone:'red'};
+      return{tab:'psych',stage,processStatus:p.status||'Perlu perhatian',decision:p.workflow_decision||'Perlu Review HR',action:'psych-review',label:'Review Psikotes',tone:'amber'};
+    }
+
+    if(stage==='Interview HR'){
+      const sched=scheduled21(appId,'Interview HR'),card=scorecard21(appId,'Interview HR');
+      if(!sched)return{tab:'hr',stage,processStatus:'Belum dijadwalkan',decision:'Belum Ada',action:'hr-schedule',label:'Jadwalkan Interview HR',tone:'blue'};
+      if(!card)return{tab:'hr',stage,processStatus:'Sudah dijadwalkan',decision:'Belum Dinilai',action:'hr-score',label:'Isi Interview HR',tone:'indigo'};
+      const d=interviewDecision(card.workflow_decision||card.recommendation);
+      if(d==='Lanjut')return{tab:'hr',stage,processStatus:'Penilaian selesai',decision:'Lanjut',action:'user-schedule',label:'Jadwalkan Interview User',tone:'emerald'};
+      if(d==='Tidak Lanjut')return{tab:'hr',stage,processStatus:'Penilaian selesai',decision:d,action:'reject-finalize',label:'Finalisasi Tidak Lanjut',tone:'red'};
+      if(d==='Talent Pool')return{tab:'hr',stage,processStatus:'Penilaian selesai',decision:d,action:'talent-finalize',label:'Masukkan Talent Pool',tone:'amber'};
+      return{tab:'hr',stage,processStatus:'Penilaian selesai',decision:d,action:'hr-result',label:'Review Hasil Interview HR',tone:'amber'};
+    }
+
+    if(stage==='Interview User'){
+      const sched=scheduled21(appId,'Interview User'),card=scorecard21(appId,'Interview User'),lnk=link21(appId,'Interview User');
+      if(!sched)return{tab:'user',stage,processStatus:'Belum dijadwalkan',decision:'Belum Ada',action:'user-schedule',label:'Jadwalkan Interview User',tone:'blue'};
+      if(!card){
+        if(!lnk)return{tab:'user',stage,processStatus:'Terjadwal · link belum dibuat',decision:'Belum Dinilai',action:'user-link',label:'Buat Link Scorecard User',tone:'indigo'};
+        return{tab:'user',stage,processStatus:`Menunggu User · ${lnk.status||'Link aktif'}`,decision:'Belum Dinilai',action:'user-link',label:'Lihat / Salin Link User',tone:'amber'};
+      }
+      const d=interviewDecision(card.workflow_decision||card.recommendation);
+      if(d==='Lanjut')return{tab:'user',stage,processStatus:'Penilaian selesai',decision:'Lanjut',action:'user-offering',label:'Buat Offering',tone:'emerald'};
+      if(d==='Tidak Lanjut')return{tab:'user',stage,processStatus:'Penilaian selesai',decision:d,action:'reject-finalize',label:'Finalisasi Tidak Lanjut',tone:'red'};
+      if(d==='Talent Pool')return{tab:'user',stage,processStatus:'Penilaian selesai',decision:d,action:'talent-finalize',label:'Masukkan Talent Pool',tone:'amber'};
+      return{tab:'user',stage,processStatus:'Penilaian selesai',decision:d,action:'user-result',label:'Review Hasil Interview User',tone:'amber'};
+    }
+
+    if(['Offering','Interview Final','Medical Check Up'].includes(stage)){
+      const off=offering21(appId);
+      if(stage!=='Offering'&&!off)return{tab:'offering',stage,processStatus:'Siap Offering',decision:'Lanjut',action:'user-offering',label:'Lanjut ke Offering',tone:'emerald'};
+      if(!off)return{tab:'offering',stage,processStatus:'Offering belum dibuat',decision:'Belum Ada',action:'offering-create',label:'Buat Offering',tone:'blue'};
+      return{tab:'offering',stage,processStatus:off.status||'Offering dibuat',decision:off.status||'Belum Ada',action:'offering-manage',label:'Kelola Offering',tone:['Ditolak','Kadaluarsa','Dibatalkan'].includes(off.status)?'red':'amber',offeringId:off.offering_id};
+    }
+
+    return{tab:null,stage,processStatus:'Tidak ada tindakan aktif',decision:'—',action:null,label:null,tone:'slate'};
+  }
+
+  function toneClasses(tone){return({blue:'bg-blue-50 text-blue-700 border-blue-100',indigo:'bg-indigo-50 text-indigo-700 border-indigo-100',amber:'bg-amber-50 text-amber-700 border-amber-100',emerald:'bg-emerald-50 text-emerald-700 border-emerald-100',red:'bg-red-50 text-red-700 border-red-100',slate:'bg-slate-50 text-slate-600 border-slate-100'})[tone]||'bg-slate-50 text-slate-600 border-slate-100';}
+
+  function tasksByTab(){
+    const out={screening:[],psych:[],hr:[],user:[],offering:[]};
+    scopedApps().filter(a=>a.status!=='Tidak Lanjut'&&a.status!=='Diterima'&&a.current_stage!=='Talent Pool').forEach(app=>{
+      const st=taskState(app);if(st?.tab&&st.action)out[st.tab].push({app,state:st});
+    });
+    return out;
+  }
+
+  function updateSelectionBadge(tasks){
+    const n=Object.values(tasks).reduce((s,a)=>s+a.length,0),b=document.getElementById('navBadgeSelectionV21');
+    if(b){b.textContent=n>99?'99+':String(n);b.classList.toggle('hidden',n===0);}
+  }
+
+  function tabLabel(k){return({screening:'Screening',psych:'Psikotes',hr:'Interview HR',user:'Interview User',offering:'Offering'})[k]||k;}
+  function actionIcon(action){if(action?.includes('screen'))return'fa-filter';if(action?.includes('psych'))return'fa-brain';if(action?.includes('schedule'))return'fa-calendar-plus';if(action?.includes('score')||action?.includes('result'))return'fa-clipboard-check';if(action?.includes('link'))return'fa-link';if(action?.includes('offering'))return'fa-handshake';if(action?.includes('reject'))return'fa-circle-xmark';if(action?.includes('talent'))return'fa-box-archive';return'fa-arrow-right';}
+
+  async function renderSelectionQueue(reload=true){
+    injectSelectionQueueUi();if(reload)await loadQueueData(false);
+    const root=document.getElementById('page-selection-queue');if(!root)return;
+    const tasks=tasksByTab();updateSelectionBadge(tasks);
+    if(!tasks[V21.activeTab])V21.activeTab='screening';const rows=tasks[V21.activeTab]||[];
+    const total=Object.values(tasks).reduce((s,a)=>s+a.length,0);
+    root.innerHTML=`
+      <div class="flex flex-col lg:flex-row lg:items-start justify-between gap-4 mb-5">
+        <div><h1 class="text-2xl font-bold">Antrian Seleksi</h1><p class="text-sm text-slate-500 mt-1">Satu tempat untuk seluruh pekerjaan seleksi yang perlu ditindak HR. Tahap kandidat bergerak melalui keputusan proses, bukan drag & drop.</p></div>
+        <button onclick="renderSelectionQueueV21(true)" class="px-3 py-2 border rounded-lg bg-white text-sm"><i class="fas fa-rotate mr-1"></i>Refresh</button>
+      </div>
+      <div class="bg-blue-50 border border-blue-100 rounded-xl p-4 mb-4 text-sm text-blue-900"><i class="fas fa-circle-info mr-2"></i><b>${total} tindakan</b> menunggu pada seluruh proses seleksi. Klik satu tindakan utama; sistem akan menjaga urutan tahap.</div>
+      <div class="flex flex-wrap gap-2 mb-4">${Object.keys(tasks).map(k=>`<button onclick="openSelectionTabV21('${k}')" class="v21-tab-btn ${V21.activeTab===k?'active':''} px-3 py-2 rounded-lg border bg-white text-sm font-medium">${tabLabel(k)} <span class="ml-1 text-xs opacity-80">${tasks[k].length}</span></button>`).join('')}</div>
+      <div class="bg-white border rounded-xl overflow-hidden">
+        <div class="overflow-x-auto"><table class="data-table w-full text-sm"><thead><tr class="border-b text-left text-xs text-slate-500 uppercase"><th class="px-4 py-3">Kandidat</th><th class="px-4 py-3">Posisi</th><th class="px-4 py-3">Status Proses</th><th class="px-4 py-3">Keputusan</th><th class="px-4 py-3">Next Action</th><th class="px-4 py-3">Profil</th></tr></thead>
+        <tbody>${rows.map(({app,state})=>{const c=candById21(app.candidate_id),p=posById21(app.position_id),co=coById21(app.company_id);return`<tr class="v21-task-row border-b"><td class="px-4 py-3"><div class="font-semibold">${h(c?.candidate_name||'-')}</div><div class="text-[10px] font-mono text-slate-400">${h(app.application_id)}</div></td><td class="px-4 py-3">${h(p?.position_name||'-')}<div class="text-[10px] text-slate-400">${h(co?.brand||co?.company_name||'')}</div></td><td class="px-4 py-3"><div class="font-medium">${h(state.processStatus)}</div><div class="text-[10px] text-slate-400">Tahap: ${h(state.stage)}</div></td><td class="px-4 py-3"><span class="inline-flex px-2 py-1 rounded-full border text-[10px] font-semibold ${toneClasses(state.tone)}">${h(state.decision)}</span></td><td class="px-4 py-3"><button onclick="runNextActionV21('${h(app.application_id)}')" class="px-3 py-2 bg-primary-600 text-white rounded-lg text-xs font-semibold whitespace-nowrap"><i class="fas ${actionIcon(state.action)} mr-1"></i>${h(state.label)}</button></td><td class="px-4 py-3"><button onclick="viewCandidateDetail('${h(app.candidate_id)}','${h(app.application_id)}')" class="text-primary-700 text-xs font-semibold">Buka 360°</button></td></tr>`;}).join('')||`<tr><td colspan="6" class="p-10 text-center text-slate-400"><i class="fas fa-circle-check text-2xl text-emerald-500 mb-2"></i><div>Tidak ada tindakan pada ${tabLabel(V21.activeTab)}.</div></td></tr>`}</tbody></table></div>
+      </div>`;
+  }
+
+  function openSelectionTab(tab){V21.activeTab=tab;if(typeof navigate==='function'&&typeof currentPage!=='undefined'&&currentPage!=='selection-queue')navigate('selection-queue');else renderSelectionQueue(false);}
+
+  async function openOfferingForApp(appId){
+    const app=appById21(appId);if(!app)return showToast('Kandidat tidak ditemukan','danger');
+    if(app.current_stage!=='Offering'){
+      if(typeof window.transitionStageV2!=='function')return showToast('Workflow transition tidak tersedia','danger');
+      const moved=await window.transitionStageV2(appId,'Offering');if(!moved)return;
+    }
+    if(typeof openOfferingModal!=='function')return showToast('Form Offering tidak tersedia','danger');
+    openOfferingModal();
+    setTimeout(()=>{const sel=document.getElementById('offCand');if(!sel)return;sel.value=appId;try{sel.dispatchEvent(new Event('change',{bubbles:true}));}catch(_){}},30);
+  }
+
+  async function finalizeRejectV21(appId){
+    if(typeof openRejectModal==='function')return openRejectModal(appId);
+    const reason=prompt('Alasan kandidat tidak dilanjutkan:');
+    if(!reason||!reason.trim())return;
+    return window.transitionStageV2?.(appId,'Tidak Lanjut',reason.trim());
+  }
+
+  async function finalizeTalentPoolV21(appId){
+    if(!confirm('Masukkan kandidat ke Talent Pool?'))return;
+    return window.transitionStageV2?.(appId,'Talent Pool');
+  }
+
+  async function runNextAction(appId){
+    const app=appById21(appId);if(!app)return showToast('Application tidak ditemukan','danger');
+    if(!V21.loadedAt)await loadQueueData(true);const st=taskState(app);if(!st?.action)return showToast('Tidak ada tindakan yang perlu dilakukan pada kandidat ini.','info');
+    switch(st.action){
+      case'screen-evaluate':return window.rerunScreeningV2?.(appId);
+      case'screen-review':return window.openScreenReviewV2?.(appId);
+      case'screen-advance':return window.transitionStageV2?.(appId,'Psikotes');
+      case'psych-create':return window.createPsychAccessV2?.(appId);
+      case'psych-access':return window.showPsychAccessV2?.(appId);
+      case'psych-review':return window.openPsychReviewV2?.(appId);
+      case'psych-advance':return typeof openInterviewModal==='function'?openInterviewModal(appId,'Interview HR'):showToast('Form jadwal Interview HR tidak tersedia','danger');
+      case'hr-schedule':return typeof openInterviewModal==='function'?openInterviewModal(appId,'Interview HR'):showToast('Form jadwal Interview HR tidak tersedia','danger');
+      case'hr-score':return typeof openInterviewScorecard==='function'?openInterviewScorecard(appId,'Interview HR'):showToast('Scorecard HR tidak tersedia','danger');
+      case'hr-result':return typeof viewInterviewResult==='function'?viewInterviewResult(appId):showToast('Hasil Interview HR tidak tersedia','warning');
+      case'user-schedule':return typeof openInterviewModal==='function'?openInterviewModal(appId,'Interview User'):showToast('Form jadwal Interview User tidak tersedia','danger');
+      case'user-link':return typeof openInterviewerLinkModal==='function'?openInterviewerLinkModal(appId,'Interview User'):showToast('Portal Interview User tidak tersedia','danger');
+      case'user-result':return typeof viewInterviewResult==='function'?viewInterviewResult(appId):showToast('Hasil Interview User tidak tersedia','warning');
+      case'reject-finalize':return finalizeRejectV21(appId);
+      case'talent-finalize':return finalizeTalentPoolV21(appId);
+      case'user-offering':case'offering-create':return openOfferingForApp(appId);
+      case'offering-manage':{const off=offering21(appId);if(off&&typeof editOffering==='function')return editOffering(off.offering_id);if(typeof navigate==='function')return navigate('offerings');return;}
+      default:return showToast('Tindakan belum tersedia','warning');
+    }
+  }
+
+  function lockPipeline(){
+    const page=document.getElementById('page-pipeline');if(!page)return;page.classList.add('v21-readonly-pipeline');
+    const board=document.getElementById('kanbanBoard');if(!board)return;
+    board.querySelectorAll('.kanban-col').forEach(col=>{col.removeAttribute('ondragover');col.removeAttribute('ondrop');col.removeAttribute('ondragleave');col.classList.remove('drag-over');});
+    board.querySelectorAll('.candidate-card').forEach(card=>{card.draggable=false;card.setAttribute('draggable','false');card.removeAttribute('ondragstart');card.removeAttribute('ondragend');card.classList.remove('dragging');});
+    const wrapper=document.getElementById('kanbanWrapper')||board.parentElement;
+    if(wrapper&&!document.getElementById('v21PipelineInfo')){const d=document.createElement('div');d.id='v21PipelineInfo';d.className='mb-4 p-4 rounded-xl border border-blue-100 bg-blue-50 text-sm text-blue-900';d.innerHTML='<i class="fas fa-eye mr-2"></i><b>Pipeline sekarang read-only.</b> Gunakan Pipeline untuk melihat posisi kandidat. Untuk memproses kandidat, buka <b>Antrian Seleksi</b> atau Candidate Profile 360°.';wrapper.parentElement?.insertBefore(d,wrapper);}
+  }
+
+  function createOverflowMenu(controlRow){
+    if(!controlRow||controlRow.querySelector('.v21-overflow'))return;
+    const secondary=[];
+    [...controlRow.querySelectorAll('button')].forEach(btn=>{
+      const t=(btn.textContent||'').trim();
+      if(!t)return;
+      if(/WhatsApp/i.test(t))return;
+      if(/^(Ubah Status|Pindah|Hire)$/i.test(t)||/^Screening$/i.test(t)){btn.remove();return;}
+      secondary.push(btn);
+    });
+    if(!secondary.length)return;
+    const wrap=document.createElement('div');wrap.className='v21-overflow';
+    const toggle=document.createElement('button');toggle.type='button';toggle.className='px-3 py-1.5 border rounded-lg bg-white text-slate-600 text-sm font-bold';toggle.innerHTML='<i class="fas fa-ellipsis"></i>';toggle.title='Aksi lainnya';
+    const menu=document.createElement('div');menu.className='v21-overflow-menu hidden';
+    secondary.forEach(btn=>{btn.className='text-slate-700';menu.appendChild(btn);});
+    toggle.addEventListener('click',e=>{e.stopPropagation();menu.classList.toggle('hidden');});
+    menu.addEventListener('click',e=>e.stopPropagation());
+    wrap.append(toggle,menu);controlRow.appendChild(wrap);
+    document.addEventListener('click',e=>{if(!wrap.contains(e.target))menu.classList.add('hidden');});
+  }
+
+  async function simplifyCandidateDetail(appId){
+    V21.detailAppId=appId;await loadQueueData(true);const root=document.getElementById('candidateDetailContent');if(!root)return;
+    const select=document.getElementById('detailStageSelect'),controlRow=select?.parentElement||[...root.querySelectorAll('div')].find(d=>[...d.querySelectorAll(':scope > button')].some(b=>/Ubah Status|Pindah|WhatsApp|Gugur|Hire/.test(b.textContent||'')));
+    if(select)select.remove();
+    if(controlRow){[...controlRow.querySelectorAll('button')].forEach(btn=>{const t=(btn.textContent||'').trim();if(/^(Ubah Status|Pindah|Hire)$/i.test(t)||/^Screening$/i.test(t))btn.remove();});createOverflowMenu(controlRow);}
+    root.querySelector('#v21NextActionCard')?.remove();
+    const app=appById21(appId);if(!app)return;const st=taskState(app),firstCard=root.querySelector(':scope > .bg-white.rounded-xl')||root.firstElementChild;
+    const card=document.createElement('div');card.id='v21NextActionCard';card.className='v21-next-card bg-white rounded-xl border border-slate-200 p-5 mb-4';
+    card.innerHTML=`<div class="flex flex-col lg:flex-row lg:items-center justify-between gap-4"><div><div class="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Next Action</div><div class="text-lg font-bold mt-1">${h(st?.label||'Tidak ada tindakan berikutnya')}</div><div class="text-xs text-slate-500 mt-1">Sistem menentukan langkah berikut berdasarkan hasil tahap sebelumnya.</div></div>${st?.action?`<button onclick="runNextActionV21('${h(appId)}')" class="px-4 py-2.5 bg-primary-600 text-white rounded-lg text-sm font-semibold whitespace-nowrap"><i class="fas ${actionIcon(st.action)} mr-2"></i>${h(st.label)}</button>`:'<span class="px-3 py-2 rounded-lg bg-slate-100 text-slate-500 text-xs font-semibold">Tidak ada tindakan aktif</span>'}</div><div class="grid grid-cols-1 sm:grid-cols-3 gap-2 mt-4"><div class="rounded-lg bg-slate-50 p-3"><div class="text-[10px] uppercase text-slate-400">Tahap</div><div class="text-sm font-semibold mt-1">${h(st?.stage||app.current_stage||'-')}</div></div><div class="rounded-lg bg-slate-50 p-3"><div class="text-[10px] uppercase text-slate-400">Status Proses</div><div class="text-sm font-semibold mt-1">${h(st?.processStatus||'-')}</div></div><div class="rounded-lg bg-slate-50 p-3"><div class="text-[10px] uppercase text-slate-400">Keputusan</div><div class="mt-1"><span class="inline-flex px-2 py-1 rounded-full border text-[10px] font-semibold ${toneClasses(st?.tone)}">${h(st?.decision||'-')}</span></div></div></div>`;
+    if(firstCard?.parentNode)firstCard.parentNode.insertBefore(card,firstCard.nextSibling);else root.prepend(card);
+  }
+
+  function decorateDashboard(){
+    const box=document.getElementById('recruiterTasks');if(!box)return;
+    const tasks=tasksByTab();updateSelectionBadge(tasks);
+    const data=[['screening','fa-filter','Screening',tasks.screening.length,'text-blue-700 bg-blue-50'],['psych','fa-brain','Psikotes',tasks.psych.length,'text-purple-700 bg-purple-50'],['hr','fa-user-tie','Interview HR',tasks.hr.length,'text-indigo-700 bg-indigo-50'],['user','fa-users','Interview User',tasks.user.length,'text-amber-700 bg-amber-50'],['offering','fa-handshake','Offering',tasks.offering.length,'text-emerald-700 bg-emerald-50']];
+    box.className='grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-3';
+    box.innerHTML=data.map(([tab,icon,label,count,cls])=>`<button onclick="openSelectionTabV21('${tab}')" class="text-left rounded-lg border border-slate-100 p-3 ${cls} hover:shadow-sm"><div class="flex items-center justify-between"><i class="fas ${icon}"></i><span class="text-2xl font-bold">${count}</span></div><div class="text-xs font-medium mt-2">${label} perlu tindakan</div></button>`).join('');
+  }
+
+  function refreshUxAfterAction(){
+    clearTimeout(V21.refreshTimer);V21.refreshTimer=setTimeout(async()=>{await loadQueueData(true);if(typeof currentPage!=='undefined'&&currentPage==='selection-queue')renderSelectionQueue(false);if(V21.detailAppId&&document.getElementById('candidateDetailContent'))simplifyCandidateDetail(V21.detailAppId);if(typeof currentPage!=='undefined'&&currentPage==='dashboard')decorateDashboard();},650);
+  }
+
+  function wrapAction(name){
+    const orig=window[name];if(typeof orig!=='function'||orig.__v21wrapped)return;
+    const wrapped=function(...args){const r=orig.apply(this,args);if(r&&typeof r.then==='function')return r.finally(refreshUxAfterAction);refreshUxAfterAction();return r;};wrapped.__v21wrapped=true;window[name]=wrapped;
+  }
+
+  function installHooks(){
+    injectSelectionQueueUi();
+
+    if(typeof window.renderPage==='function'&&!window.renderPage.__v21wrapped){const orig=window.renderPage;const wrapped=function(page){hideLegacyWorkflowNav();if(page==='selection-queue')return renderSelectionQueue(true);const r=orig(page);if(page==='pipeline')setTimeout(lockPipeline,0);if(page==='dashboard')setTimeout(async()=>{await loadQueueData(true);decorateDashboard();},0);return r;};wrapped.__v21wrapped=true;window.renderPage=wrapped;}
+
+    if(typeof window.renderPipeline==='function'&&!window.renderPipeline.__v21wrapped){const orig=window.renderPipeline;const wrapped=function(...args){const r=orig.apply(this,args);setTimeout(lockPipeline,0);return r;};wrapped.__v21wrapped=true;window.renderPipeline=wrapped;}
+    window.allowDrop=function(e){e?.preventDefault?.();};
+    window.dropCard=function(e){e?.preventDefault?.();if(typeof showToast==='function')showToast('Pipeline hanya untuk melihat posisi kandidat. Gunakan Antrian Seleksi untuk memproses kandidat.','info');};
+
+    if(typeof window.viewCandidateDetail==='function'&&!window.viewCandidateDetail.__v21wrapped){const orig=window.viewCandidateDetail;const wrapped=function(candidateId,appId){const r=orig.apply(this,arguments),id=appId||(DB?.applications||[]).find(a=>a.candidate_id===candidateId)?.application_id;if(id){V21.detailAppId=id;setTimeout(()=>simplifyCandidateDetail(id),80);}return r;};wrapped.__v21wrapped=true;window.viewCandidateDetail=wrapped;}
+
+    ['saveScreenReviewV2','savePsychReviewV2','rerunScreeningV2','advanceToInterviewHrV2','saveNewInterview','saveScorecard','generatePortalLink','saveNewOffering','acceptOffer','rejectOffer'].forEach(wrapAction);
+
+    const oldNav=window.navigate;if(typeof oldNav==='function'&&!oldNav.__v21wrapped){const nav=function(page,...rest){hideLegacyWorkflowNav();return oldNav.call(this,page,...rest);};nav.__v21wrapped=true;window.navigate=nav;}
+  }
+
+  Object.assign(window,{renderSelectionQueueV21:renderSelectionQueue,openSelectionTabV21:openSelectionTab,runNextActionV21:runNextAction,simplifyCandidateDetailV21:simplifyCandidateDetail,lockPipelineV21:lockPipeline});
+
+  injectSelectionQueueUi();installHooks();
+  document.addEventListener('DOMContentLoaded',()=>setTimeout(async()=>{injectSelectionQueueUi();installHooks();await loadQueueData(true);hideLegacyWorkflowNav();if(typeof currentPage!=='undefined'&&currentPage==='pipeline')lockPipeline();if(typeof currentPage!=='undefined'&&currentPage==='dashboard')decorateDashboard();},1450));
+  console.log('%cRecruitment ATS V2.1 UX Simplified active','color:#7c3aed;font-weight:bold');
+})();
