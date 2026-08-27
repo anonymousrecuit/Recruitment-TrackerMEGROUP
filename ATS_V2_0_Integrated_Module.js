@@ -503,11 +503,62 @@
     }
   }
 
+  function updatePipelineCopy(page){
+    if(!page)return;
+    const headings=[...page.querySelectorAll('h1,h2,h3')];
+    const title=headings.find(el=>/Recruitment Pipeline/i.test(el.textContent||''));
+    if(title){
+      const sub=title.parentElement?.querySelector('p');
+      if(sub&&/Geser kartu|pakai Pindah|Gugur|WhatsApp/i.test(sub.textContent||'')){
+        sub.innerHTML='Lihat posisi kandidat pada setiap tahapan. Proses seleksi dilakukan dari <b>Antrian Seleksi</b> atau Candidate Profile 360°.';
+      }
+    }
+  }
+
+  function stripPipelineActions(board){
+    if(!board)return;
+    const forbiddenText=/^(Pindah|Hire|Gugur|Reject|Tidak Lanjut)$/i;
+    const forbiddenCode=/(openMove|moveCandidateStage|hireCandidate|rejectCandidate|openReject|gugur|rejectApplication)/i;
+    board.querySelectorAll('button,a,[role="button"]').forEach(el=>{
+      const text=(el.textContent||'').trim().replace(/\s+/g,' ');
+      const code=[el.getAttribute('onclick')||'',el.getAttribute('href')||'',el.getAttribute('data-action')||'',el.id||''].join(' ');
+      if(forbiddenText.test(text)||forbiddenCode.test(code)){el.remove();}
+    });
+  }
+
+  function installPipelineGuard(){
+    if(document.__v211PipelineGuard)return;
+    document.__v211PipelineGuard=true;
+    document.addEventListener('click',function(e){
+      const page=document.getElementById('page-pipeline');
+      if(!page||page.classList.contains('hidden')||page.offsetParent===null)return;
+      const el=e.target?.closest?.('button,a,[role="button"]');
+      if(!el||!page.contains(el))return;
+      const text=(el.textContent||'').trim().replace(/\s+/g,' ');
+      const code=[el.getAttribute('onclick')||'',el.getAttribute('href')||'',el.getAttribute('data-action')||'',el.id||''].join(' ');
+      if(/^(Pindah|Hire|Gugur|Reject|Tidak Lanjut)$/i.test(text)||/(openMove|moveCandidateStage|hireCandidate|rejectCandidate|openReject|gugur|rejectApplication)/i.test(code)){
+        e.preventDefault();e.stopPropagation();e.stopImmediatePropagation();
+        if(typeof closeModal==='function')try{closeModal();}catch(_){}
+        if(typeof showToast==='function')showToast('Pipeline hanya untuk melihat posisi kandidat. Proses kandidat dari Antrian Seleksi atau Candidate Profile 360°.','info');
+      }
+    },true);
+  }
+
   function lockPipeline(){
     const page=document.getElementById('page-pipeline');if(!page)return;page.classList.add('v21-readonly-pipeline');
+    updatePipelineCopy(page);
     const board=document.getElementById('kanbanBoard');if(!board)return;
     board.querySelectorAll('.kanban-col').forEach(col=>{col.removeAttribute('ondragover');col.removeAttribute('ondrop');col.removeAttribute('ondragleave');col.classList.remove('drag-over');});
-    board.querySelectorAll('.candidate-card').forEach(card=>{card.draggable=false;card.setAttribute('draggable','false');card.removeAttribute('ondragstart');card.removeAttribute('ondragend');card.classList.remove('dragging');});
+    board.querySelectorAll('.candidate-card,[draggable="true"]').forEach(card=>{card.draggable=false;card.setAttribute('draggable','false');card.removeAttribute('ondragstart');card.removeAttribute('ondragend');card.classList.remove('dragging');});
+    stripPipelineActions(board);
+    if(!board.__v211Observer){
+      board.__v211Observer=new MutationObserver(()=>{
+        board.querySelectorAll('.candidate-card,[draggable="true"]').forEach(card=>{card.draggable=false;card.setAttribute('draggable','false');card.removeAttribute('ondragstart');card.removeAttribute('ondragend');card.classList.remove('dragging');});
+        stripPipelineActions(board);
+      });
+      board.__v211Observer.observe(board,{childList:true,subtree:true});
+    }
+    installPipelineGuard();
     const wrapper=document.getElementById('kanbanWrapper')||board.parentElement;
     if(wrapper&&!document.getElementById('v21PipelineInfo')){const d=document.createElement('div');d.id='v21PipelineInfo';d.className='mb-4 p-4 rounded-xl border border-blue-100 bg-blue-50 text-sm text-blue-900';d.innerHTML='<i class="fas fa-eye mr-2"></i><b>Pipeline sekarang read-only.</b> Gunakan Pipeline untuk melihat posisi kandidat. Untuk memproses kandidat, buka <b>Antrian Seleksi</b> atau Candidate Profile 360°.';wrapper.parentElement?.insertBefore(d,wrapper);}
   }
@@ -582,5 +633,5 @@
 
   injectSelectionQueueUi();installHooks();
   document.addEventListener('DOMContentLoaded',()=>setTimeout(async()=>{injectSelectionQueueUi();installHooks();await loadQueueData(true);hideLegacyWorkflowNav();if(typeof currentPage!=='undefined'&&currentPage==='pipeline')lockPipeline();if(typeof currentPage!=='undefined'&&currentPage==='dashboard')decorateDashboard();},1450));
-  console.log('%cRecruitment ATS V2.1 UX Simplified active','color:#7c3aed;font-weight:bold');
+  console.log('%cRecruitment ATS V2.1.1 UX Pipeline Lock active','color:#7c3aed;font-weight:bold');
 })();
