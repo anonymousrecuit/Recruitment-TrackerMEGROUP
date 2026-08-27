@@ -1462,3 +1462,653 @@ Tim Rekrutmen {brand}`
     'color:#0f766e;font-weight:bold'
   );
 })();
+
+/* ==========================================================================
+   RECRUITMENT ATS V2.4 - PHASE B1.1
+   UNIFIED CANDIDATE ASSESSMENT REPORT
+
+   Goals:
+   - Replace the legacy raw jsPDF interview export used by Candidate Package.
+   - Generate one professional Candidate Assessment Report PDF.
+   - Preview the exact PDF before download.
+   - Merge a PDF CV into the same file as an appendix when available.
+   - Read CV bytes with authenticated Supabase Storage download first.
+   - Keep current recruitment workflow and database untouched.
+   ========================================================================== */
+(function(){
+  'use strict';
+
+  if(window.__ATS_V24_UNIFIED_REPORT_ACTIVE) return;
+  window.__ATS_V24_UNIFIED_REPORT_ACTIVE = true;
+
+  const REPORT = {
+    currentUrl: null,
+    currentBlob: null,
+    currentName: null,
+    currentAppId: null,
+    pdfLibPromise: null
+  };
+
+  const COLORS = {
+    navy: [15, 23, 42],
+    blue: [37, 99, 235],
+    indigo: [79, 70, 229],
+    green: [5, 150, 105],
+    amber: [217, 119, 6],
+    red: [220, 38, 38],
+    slate: [71, 85, 105],
+    muted: [100, 116, 139],
+    line: [226, 232, 240],
+    soft: [248, 250, 252],
+    white: [255, 255, 255]
+  };
+
+  function toast24(msg, type='warning'){
+    try{ if(typeof showToast === 'function') return showToast(msg, type); }catch(_){}
+    console.warn(msg);
+  }
+
+  function safe24(v){
+    return String(v == null ? '' : v).replace(/[\u2013\u2014]/g, '-').replace(/[\u2022]/g, '-');
+  }
+
+  function fmt24(v){
+    if(!v) return '-';
+    try{ return new Date(v).toLocaleDateString('id-ID',{day:'2-digit',month:'short',year:'numeric'}); }
+    catch(_){ return safe24(v); }
+  }
+
+  function money24(v){
+    const n = Number(v);
+    if(!Number.isFinite(n) || n <= 0) return '-';
+    return 'Rp ' + n.toLocaleString('id-ID');
+  }
+
+  function app24(appId){
+    try{ return typeof getApplication === 'function' ? getApplication(appId) : (DB?.applications||[]).find(x=>x.application_id===appId); }
+    catch(_){ return null; }
+  }
+
+  function cand24(id){
+    try{ return typeof getCandidate === 'function' ? getCandidate(id) : (DB?.candidates||[]).find(x=>x.candidate_id===id); }
+    catch(_){ return null; }
+  }
+
+  function pos24(id){
+    try{ return typeof getPosition === 'function' ? getPosition(id) : (DB?.positions||[]).find(x=>x.position_id===id); }
+    catch(_){ return null; }
+  }
+
+  function company24(id){
+    try{ return typeof getCompany === 'function' ? getCompany(id) : (DB?.companies||[]).find(x=>x.company_id===id); }
+    catch(_){ return null; }
+  }
+
+  function scorecards24(appId){
+    try{
+      if(typeof scorecardsFor === 'function') return scorecardsFor(appId) || [];
+      const rows = (DB?.interview_scorecards||DB?.scorecards||[]).filter(x=>x.application_id===appId);
+      return rows;
+    }catch(_){ return []; }
+  }
+
+  function latestCard24(appId,type){
+    return [...scorecards24(appId)]
+      .filter(x=>x.interview_type===type)
+      .sort((a,b)=>new Date(b.created_at||0)-new Date(a.created_at||0))[0] || null;
+  }
+
+  function pct24(r){
+    if(!r) return null;
+    let n = Number(r.weighted_score ?? r.score);
+    if(!Number.isFinite(n)) return null;
+    if(n <= 4.1) n *= 25;
+    return Math.max(0,Math.min(100,n));
+  }
+
+  function decision24(v){
+    const s = safe24(v).trim();
+    if(['Lanjut','Sangat Direkomendasikan','Direkomendasikan','Lolos Otomatis'].includes(s)) return 'Lanjut';
+    if(['Talent Pool'].includes(s)) return 'Talent Pool';
+    if(['Tidak Lanjut','Tidak Direkomendasikan','Tidak Lolos Otomatis'].includes(s)) return 'Tidak Lanjut';
+    if(['Pertimbangkan','Perlu Review HR','Rekomendasikan Posisi Lain'].includes(s)) return 'Perlu Review HR';
+    return s || '-';
+  }
+
+  function risk24(card){
+    const n = Array.isArray(card?.red_flags) ? card.red_flags.length : 0;
+    return n >= 3 ? 'Tinggi' : n > 0 ? 'Sedang' : 'Rendah';
+  }
+
+  function interviewAnalysis24(card){
+    if(!card) return null;
+    const items = Array.isArray(card.detail_json) ? card.detail_json : [];
+    const flags = Array.isArray(card.red_flags) ? card.red_flags : [];
+    const strengths = items
+      .filter(x=>Number(x.score)>=3)
+      .sort((a,b)=>Number(b.score)-Number(a.score))
+      .slice(0,5)
+      .map(x=>({name:safe24(x.competency_name||'Kompetensi'),score:Number(x.score||0),evidence:safe24(x.evidence||'')}));
+    const gaps = items
+      .filter(x=>Number(x.score)<=2)
+      .sort((a,b)=>Number(a.score)-Number(b.score))
+      .slice(0,5)
+      .map(x=>({name:safe24(x.competency_name||'Kompetensi'),score:Number(x.score||0),evidence:safe24(x.evidence||'')}));
+    return {
+      score: pct24(card),
+      recommendation: safe24(card.recommendation||'-'),
+      decision: decision24(card.workflow_decision||card.recommendation),
+      risk: risk24(card),
+      flags: flags.map(safe24),
+      strengths,
+      gaps,
+      items,
+      first: Array.isArray(card.first_impression) ? card.first_impression : [],
+      notes: safe24(card.notes||card.conclusion||''),
+      cvNotes: safe24(card.cv_background_notes||''),
+      redFlagNotes: safe24(card.red_flag_notes||''),
+      reviewNotes: safe24(card.workflow_review_notes||''),
+      reviewedBy: safe24(card.workflow_reviewed_by||''),
+      reviewedAt: card.workflow_reviewed_at||null
+    };
+  }
+
+  async function screening24(appId){
+    try{
+      const {data,error} = await sb.rpc('get_screening_summary_for_application',{p_application_id:appId});
+      if(error) throw error;
+      return data || {exists:false};
+    }catch(e){
+      console.warn('[ATS V2.4 report] screening summary unavailable',e);
+      return {exists:false,error:true};
+    }
+  }
+
+  async function psych24(appId){
+    try{
+      const {data,error} = await sb.rpc('get_psychotest_summary_for_application',{p_application_id:appId});
+      if(error) throw error;
+      return data || {exists:false};
+    }catch(e){
+      console.warn('[ATS V2.4 report] psych summary unavailable',e);
+      return {exists:false,error:true};
+    }
+  }
+
+  function offering24(appId){
+    try{
+      return [...(DB?.offerings||[])]
+        .filter(x=>x.application_id===appId)
+        .sort((a,b)=>new Date(b.offer_date||b.deadline||0)-new Date(a.offer_date||a.deadline||0))[0] || null;
+    }catch(_){ return null; }
+  }
+
+  function history24(appId){
+    try{
+      return [...(DB?.recruitment_history||[])]
+        .filter(x=>x.application_id===appId)
+        .sort((a,b)=>new Date(a.event_date||0)-new Date(b.event_date||0));
+    }catch(_){ return []; }
+  }
+
+  async function reportData24(appId){
+    const app = app24(appId);
+    const c = cand24(app?.candidate_id);
+    if(!app || !c) throw new Error('DATA_KANDIDAT_TIDAK_DITEMUKAN');
+    const [screening,psych] = await Promise.all([screening24(appId),psych24(appId)]);
+    const hr = latestCard24(appId,'Interview HR');
+    const user = latestCard24(appId,'Interview User');
+    return {
+      app,c,
+      p:pos24(app.position_id),
+      co:company24(app.company_id),
+      screening,psych,
+      hr,user,
+      hrA:interviewAnalysis24(hr),
+      userA:interviewAnalysis24(user),
+      offering:offering24(appId),
+      history:history24(appId)
+    };
+  }
+
+  function integratedSummary24(d){
+    const parts = [];
+    const s = d.screening?.screening;
+    if(s){
+      const sDecision = s.review_decision || s.screening_status || '-';
+      parts.push(`Screening: ${safe24(sDecision)}${s.match_score!=null ? ` (${Number(s.match_score).toFixed(1)}%)` : ''}.`);
+    }
+    const ps = d.psych?.session;
+    if(ps){ parts.push(`Psikotes: ${safe24(ps.workflow_decision||ps.engine_recommendation||ps.status||'-')}.`); }
+    if(d.hrA){ parts.push(`Interview HR: ${d.hrA.score!=null?d.hrA.score.toFixed(1):'-'}/100, ${d.hrA.decision}.`); }
+    if(d.userA){ parts.push(`Interview User: ${d.userA.score!=null?d.userA.score.toFixed(1):'-'}/100, ${d.userA.decision}.`); }
+    parts.push(`Tahap saat ini: ${safe24(d.app.current_stage||d.app.status||'-')}.`);
+    return parts.join(' ');
+  }
+
+  function ensureJsPdf24(){
+    if(!window.jspdf?.jsPDF) throw new Error('JSPDF_NOT_READY');
+    return window.jspdf.jsPDF;
+  }
+
+  function makeWriter24(doc){
+    const W = 210, H = 297, M = 15, CW = 180;
+    let y = 15;
+
+    function setText(color=COLORS.navy,size=9,bold=false){
+      doc.setTextColor(...color);
+      doc.setFontSize(size);
+      doc.setFont('helvetica',bold?'bold':'normal');
+    }
+    function page(){ doc.addPage(); y=15; }
+    function ensure(h=10){ if(y+h>280) page(); }
+    function text(str,x=M,size=9,bold=false,color=COLORS.navy,maxW=CW,lineH=4.5){
+      const val = safe24(str||'-');
+      setText(color,size,bold);
+      const lines = doc.splitTextToSize(val,maxW);
+      ensure(lines.length*lineH+2);
+      doc.text(lines,x,y);
+      y += lines.length*lineH;
+      return lines.length*lineH;
+    }
+    function paragraph(str,opts={}){
+      const size=opts.size||9, lineH=opts.lineH||4.6, color=opts.color||COLORS.slate;
+      const lines=doc.splitTextToSize(safe24(str||'-'),opts.width||CW);
+      ensure(lines.length*lineH+2);
+      setText(color,size,!!opts.bold);
+      doc.text(lines,opts.x||M,y);
+      y+=lines.length*lineH+(opts.after==null?2:opts.after);
+    }
+    function section(title,subtitle=''){
+      ensure(14);
+      doc.setFillColor(...COLORS.soft); doc.roundedRect(M,y,CW,11,2,2,'F');
+      setText(COLORS.navy,10,true); doc.text(safe24(title),M+4,y+4.7);
+      if(subtitle){ setText(COLORS.muted,7,false); doc.text(safe24(subtitle),M+4,y+8.4); }
+      y+=15;
+    }
+    function labelValue(label,value,x,w){
+      doc.setFillColor(...COLORS.soft); doc.roundedRect(x,y,w,15,2,2,'F');
+      setText(COLORS.muted,6.8,true); doc.text(safe24(label).toUpperCase(),x+3,y+4.2);
+      setText(COLORS.navy,9,true);
+      const lines=doc.splitTextToSize(safe24(value||'-'),w-6).slice(0,2);
+      doc.text(lines,x+3,y+9);
+    }
+    function metaGrid(rows){
+      for(let i=0;i<rows.length;i+=2){
+        ensure(18);
+        const a=rows[i],b=rows[i+1];
+        labelValue(a[0],a[1],M,87);
+        if(b) labelValue(b[0],b[1],M+93,87);
+        y+=19;
+      }
+    }
+    function scoreCards(cards){
+      ensure(25);
+      const gap=3,w=(CW-gap*3)/4;
+      cards.forEach((c,i)=>{
+        const x=M+i*(w+gap);
+        doc.setDrawColor(...COLORS.line); doc.setFillColor(255,255,255); doc.roundedRect(x,y,w,20,2,2,'FD');
+        setText(COLORS.muted,6.5,true); doc.text(safe24(c.label).toUpperCase(),x+3,y+4.5);
+        const valueLines=doc.splitTextToSize(safe24(c.value||'-'),w-6).slice(0,2);
+        setText(c.color||COLORS.navy,valueLines.length>1?8.5:11.5,true); doc.text(valueLines,x+3,y+10.2);
+        const subY=valueLines.length>1?16.2:14.4;
+        setText(COLORS.muted,6.1,false); doc.text(doc.splitTextToSize(safe24(c.sub||''),w-6).slice(0,1),x+3,y+subY);
+      });
+      y+=25;
+    }
+    function callout(title,body,color=COLORS.indigo){
+      const lines=doc.splitTextToSize(safe24(body||'-'),CW-10);
+      const h=10+lines.length*4.3;
+      ensure(h+3);
+      doc.setFillColor(...color.map(v=>Math.round(245+(v/255)*10)));
+      doc.setDrawColor(...color); doc.roundedRect(M,y,CW,h,2,2,'FD');
+      setText(color,8,true); doc.text(safe24(title),M+5,y+5);
+      setText(COLORS.navy,8.5,false); doc.text(lines,M+5,y+10);
+      y+=h+4;
+    }
+    function bullets(title,items,color=COLORS.navy){
+      section(title);
+      if(!items?.length){ paragraph('Belum ada data yang tercatat.'); return; }
+      for(const item of items){
+        const line = typeof item==='string' ? item : `${item.name}${item.score!=null?` - ${item.score}/4`:''}`;
+        const lines=doc.splitTextToSize('- '+safe24(line),CW-4);
+        ensure(lines.length*4.4+1); setText(color,8.5,false); doc.text(lines,M+2,y); y+=lines.length*4.4+1.2;
+      }
+      y+=2;
+    }
+    function keyValueTable(rows){
+      const w1=48,w2=CW-w1;
+      for(const row of rows){
+        const left=doc.splitTextToSize(safe24(row[0]||'-'),w1-6);
+        const right=doc.splitTextToSize(safe24(row[1]||'-'),w2-6);
+        const h=Math.max(left.length,right.length)*4.1+6;
+        ensure(h);
+        doc.setDrawColor(...COLORS.line); doc.rect(M,y,w1,h); doc.rect(M+w1,y,w2,h);
+        doc.setFillColor(...COLORS.soft); doc.rect(M,y,w1,h,'F');
+        setText(COLORS.slate,7.5,true); doc.text(left,M+3,y+4.5);
+        setText(COLORS.navy,8,false); doc.text(right,M+w1+3,y+4.5);
+        y+=h;
+      }
+      y+=4;
+    }
+    function competencyTable(items){
+      if(!items?.length){ paragraph('Belum ada evidence kompetensi yang tercatat.'); return; }
+      const widths=[50,18,112];
+      const header=()=>{
+        ensure(9);
+        doc.setFillColor(...COLORS.navy); doc.rect(M,y,CW,8,'F');
+        setText(COLORS.white,7,true);
+        doc.text('Kompetensi',M+3,y+5); doc.text('Skor',M+53,y+5); doc.text('Evidence',M+71,y+5);
+        y+=8;
+      };
+      header();
+      for(const it of items){
+        const a=doc.splitTextToSize(safe24(it.competency_name||'-'),widths[0]-6);
+        const b=[safe24((it.score??0)+'/4')];
+        const c=doc.splitTextToSize(safe24(it.evidence||'-'),widths[2]-6);
+        const h=Math.max(a.length,b.length,c.length)*4.1+5;
+        if(y+h>280){ page(); header(); }
+        doc.setDrawColor(...COLORS.line);
+        let x=M;
+        [widths[0],widths[1],widths[2]].forEach(w=>{doc.rect(x,y,w,h);x+=w;});
+        setText(COLORS.navy,7.5,true); doc.text(a,M+3,y+4.3);
+        setText(COLORS.navy,8,true); doc.text(b,M+53,y+4.3);
+        setText(COLORS.slate,7.3,false); doc.text(c,M+71,y+4.3);
+        y+=h;
+      }
+      y+=4;
+    }
+    function stageInterview(title,card,a){
+      section(title, card ? `${safe24(card.interviewer||'-')} | ${fmt24(card.created_at||card.assessed_at)}` : 'Belum ada hasil');
+      if(!card || !a){ paragraph('Belum ada hasil interview yang tersimpan.'); return; }
+      scoreCards([
+        {label:'Skor',value:a.score!=null?a.score.toFixed(1)+'/100':'-',sub:'Scorecard tersimpan',color:COLORS.indigo},
+        {label:'Rekomendasi',value:a.recommendation,sub:'Rekomendasi interviewer',color:COLORS.blue},
+        {label:'Workflow',value:a.decision,sub:'Keputusan proses',color:a.decision==='Lanjut'?COLORS.green:a.decision==='Tidak Lanjut'?COLORS.red:COLORS.amber},
+        {label:'Risiko',value:a.risk,sub:`${a.flags.length} red flag`,color:a.risk==='Tinggi'?COLORS.red:a.risk==='Sedang'?COLORS.amber:COLORS.green}
+      ]);
+      const summary = [
+        a.strengths.length ? `Kekuatan utama: ${a.strengths.slice(0,3).map(x=>x.name+' '+x.score+'/4').join(', ')}.` : 'Kekuatan belum cukup terdokumentasi.',
+        a.gaps.length ? `Area pendalaman: ${a.gaps.slice(0,3).map(x=>x.name+' '+x.score+'/4').join(', ')}.` : 'Tidak ada kompetensi skor 1-2 yang tercatat.',
+        a.flags.length ? `${a.flags.length} red flag tercatat dan perlu dibaca bersama klarifikasi interviewer.` : 'Tidak ada red flag yang dicentang.'
+      ].join(' ');
+      callout('Ringkasan Evidence',summary,COLORS.indigo);
+      keyValueTable([
+        ['Verifikasi CV / Profil',a.cvNotes||'Belum ada catatan verifikasi CV.'],
+        ['Kesimpulan Interviewer',a.notes||'Belum ada catatan kesimpulan tambahan.'],
+        ['Red Flag / Klarifikasi',a.flags.length ? a.flags.join('; ')+(a.redFlagNotes?' | Klarifikasi: '+a.redFlagNotes:'') : 'Tidak ada red flag dicentang.'],
+        ['Review Workflow',a.reviewNotes ? `${a.decision} - ${a.reviewNotes}` : a.decision]
+      ]);
+      section('Evidence Kompetensi'); competencyTable(a.items);
+      if(a.first.length){
+        section('First Impression & Observation');
+        keyValueTable(a.first.map(x=>[`${safe24(x.name||'-')} (${safe24(x.score||0)}/4)`,safe24(x.note||'-')]));
+      }
+    }
+    return {W,H,M,CW,getY:()=>y,setY:v=>{y=v;},page,ensure,text,paragraph,section,metaGrid,scoreCards,callout,bullets,keyValueTable,competencyTable,stageInterview,setText};
+  }
+
+  async function buildReportPdf24(d){
+    const JsPDF = ensureJsPdf24();
+    const doc = new JsPDF({unit:'mm',format:'a4',compress:true});
+    const w = makeWriter24(doc);
+
+    doc.setFillColor(...COLORS.navy); doc.rect(0,0,210,38,'F');
+    w.setText(COLORS.white,7,true); doc.text('HR CORE - RECRUITMENT',15,10);
+    w.setText(COLORS.white,17,true); doc.text('CANDIDATE ASSESSMENT REPORT',15,20);
+    w.setText([203,213,225],8,false); doc.text(`${safe24(d.c.candidate_name||'-')} | ${safe24(d.p?.position_name||'-')} | ${safe24(d.co?.brand||d.co?.company_name||'-')}`,15,28);
+    w.setY(47);
+
+    w.metaGrid([
+      ['Kandidat',d.c.candidate_name||'-'],['Application ID',d.app.application_id||'-'],
+      ['Posisi',d.p?.position_name||'-'],['Perusahaan',d.co?.brand||d.co?.company_name||'-'],
+      ['Tahap Saat Ini',d.app.current_stage||'-'],['Status',d.app.status||'-'],
+      ['Email',d.c.email||'-'],['WhatsApp',d.c.phone||'-']
+    ]);
+
+    const s=d.screening?.screening, ps=d.psych?.session;
+    w.scoreCards([
+      {label:'Screening',value:s?.match_score!=null?Number(s.match_score).toFixed(1)+'%':'-',sub:s?.review_decision||s?.screening_status||'Belum tersedia',color:COLORS.blue},
+      {label:'Psikotes',value:ps?.workflow_decision||ps?.status||'-',sub:ps?`Attempt ${ps.attempt_no||1}`:'Belum tersedia',color:COLORS.indigo},
+      {label:'Interview HR',value:d.hrA?.score!=null?d.hrA.score.toFixed(1):'-',sub:d.hrA?.decision||'Belum tersedia',color:COLORS.green},
+      {label:'Interview User',value:d.userA?.score!=null?d.userA.score.toFixed(1):'-',sub:d.userA?.decision||'Belum tersedia',color:COLORS.amber}
+    ]);
+    w.callout('Kesimpulan Terintegrasi', integratedSummary24(d), COLORS.indigo);
+
+    w.section('Profil Kandidat','Data yang tersimpan pada saat laporan dibuat');
+    w.keyValueTable([
+      ['Pendidikan',[d.c.education,d.c.major].filter(Boolean).join(' - ')||'-'],
+      ['Domisili',d.c.city||'-'],
+      ['Pengalaman',d.c.experience!=null?safe24(d.c.experience)+' tahun':'-'],
+      ['Jabatan Terakhir',d.c.last_role||'-'],
+      ['Perusahaan Terakhir',d.c.last_company||'-'],
+      ['Ekspektasi Gaji',money24(d.c.expected_salary)],
+      ['Notice Period',d.c.notice_period||'-'],
+      ['Kesiapan Shift',d.c.willing_shift||'-'],
+      ['Alasan Melamar',d.c.apply_reason||'-']
+    ]);
+
+    w.section('Screening');
+    if(s){
+      w.keyValueTable([
+        ['Hasil',s.review_decision||s.screening_status||'-'],
+        ['Match Score',s.match_score!=null?Number(s.match_score).toFixed(1)+'%':'-'],
+        ['Mode Evaluasi',s.evaluation_mode||'-'],
+        ['Catatan',s.review_notes||s.notes||'-']
+      ]);
+      const details=Array.isArray(s.detail_json)?s.detail_json:[];
+      if(details.length){
+        w.bullets('Detail Screening',details.slice(0,12).map(x=>`${safe24(x.text||x.requirement_id||'Requirement')}: ${safe24(x.result||'-')}${x.actual!=null?' | Aktual: '+safe24(x.actual):''}`),COLORS.slate);
+      }
+    }else w.paragraph('Belum ada hasil screening yang tersedia.');
+
+    w.section('Psikotes');
+    if(ps){
+      w.keyValueTable([
+        ['Status',ps.status||'-'],['Workflow Decision',ps.workflow_decision||'-'],
+        ['Engine Recommendation',ps.engine_recommendation||'-'],['Attempt',safe24(ps.attempt_no||1)],
+        ['Mulai',fmt24(ps.started_at)],['Selesai',fmt24(ps.completed_at)],
+        ['Catatan HR',ps.hr_notes||'-']
+      ]);
+      const results=Array.isArray(d.psych?.results)?d.psych.results:[];
+      if(results.length){
+        w.section('Ringkasan Hasil Psikotes');
+        w.keyValueTable(results.map(r=>[
+          `${safe24(r.test_code||'Tes')}${r.score!=null?' ('+safe24(r.score)+')':''}`,
+          [r.recommendation,r.interpretation].filter(Boolean).map(safe24).join(' - ')||'-'
+        ]));
+      }
+    }else w.paragraph('Belum ada hasil psikotes yang tersedia.');
+
+    w.stageInterview('Interview HR',d.hr,d.hrA);
+    w.stageInterview('Interview User',d.user,d.userA);
+
+    w.section('Offering / Keputusan Akhir');
+    if(d.offering){
+      w.keyValueTable([
+        ['Status Offering',d.offering.status||'-'],['Tanggal Offering',fmt24(d.offering.offer_date)],
+        ['Deadline',fmt24(d.offering.deadline)],['Expected Join',fmt24(d.offering.expected_join_date)],
+        ['Gaji',money24(d.offering.salary)],['Allowance',money24(d.offering.allowance)],
+        ['Benefit',d.offering.benefit||'-']
+      ]);
+    }else{
+      w.paragraph(`Belum ada offering tersimpan. Tahap kandidat saat ini: ${safe24(d.app.current_stage||'-')}.`);
+    }
+
+    w.section('Riwayat Proses');
+    if(d.history.length){
+      w.keyValueTable(d.history.slice(-20).map(h=>[
+        `${fmt24(h.event_date)} - ${safe24(h.stage||'Aktivitas')}`,
+        [h.notes,h.user_name?`Oleh: ${h.user_name}`:''].filter(Boolean).join(' | ')||'-'
+      ]));
+    }else w.paragraph('Belum ada riwayat proses yang tersedia pada cache Tracker.');
+
+    w.section('Lampiran CV');
+    w.paragraph(d.c.cv_path
+      ? 'CV kandidat akan digabungkan setelah halaman laporan ini apabila file CV berformat PDF dan dapat diakses oleh akun HR.'
+      : 'CV kandidat belum tersimpan pada profil.');
+
+    const reportPages=doc.getNumberOfPages();
+    for(let i=1;i<=reportPages;i++){
+      doc.setPage(i);
+      doc.setDrawColor(...COLORS.line); doc.line(15,288,195,288);
+      doc.setFont('helvetica','normal'); doc.setFontSize(6.5); doc.setTextColor(...COLORS.muted);
+      doc.text('Dokumen internal rekrutmen - dibuat dari data yang tersimpan di ATS.',15,292);
+      doc.text(`Halaman ${i} dari ${reportPages}`,195,292,{align:'right'});
+    }
+    return doc;
+  }
+
+  async function ensurePdfLib24(){
+    if(window.PDFLib?.PDFDocument) return window.PDFLib;
+    if(REPORT.pdfLibPromise) return REPORT.pdfLibPromise;
+    REPORT.pdfLibPromise = new Promise((resolve,reject)=>{
+      const existing=document.querySelector('script[data-ats-pdflib="1"]');
+      if(existing){ existing.addEventListener('load',()=>resolve(window.PDFLib)); existing.addEventListener('error',reject); return; }
+      const s=document.createElement('script');
+      s.src='https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js';
+      s.async=true; s.dataset.atsPdflib='1';
+      s.onload=()=>window.PDFLib?.PDFDocument?resolve(window.PDFLib):reject(new Error('PDFLIB_NOT_READY'));
+      s.onerror=()=>reject(new Error('PDFLIB_LOAD_FAILED'));
+      document.head.appendChild(s);
+    });
+    return REPORT.pdfLibPromise;
+  }
+
+  function normalizeCvPathReport24(raw){
+    if(typeof window.normalizeCvObjectPathV24 === 'function') return window.normalizeCvObjectPathV24(raw);
+    let v=String(raw||'').trim();
+    if(!v) return '';
+    try{
+      if(/^https?:\/\//i.test(v)){
+        const u=new URL(v); const marker='/cv-uploads/'; const i=u.pathname.indexOf(marker);
+        if(i>=0) return decodeURIComponent(u.pathname.slice(i+marker.length)).replace(/^\/+/, '');
+      }
+    }catch(_){}
+    return v.split('?')[0].split('#')[0].replace(/^\/+/, '').replace(/^cv-uploads\//i,'');
+  }
+
+  function cvExtReport24(path){
+    const p=normalizeCvPathReport24(path); const m=p.match(/\.([a-z0-9]{1,5})$/i);
+    return (m?.[1]||'').toLowerCase();
+  }
+
+  async function cvBytes24(c){
+    const path=normalizeCvPathReport24(c?.cv_path);
+    if(!path) throw new Error('CV_PATH_INVALID');
+    const storage=sb.storage.from('cv-uploads');
+
+    try{
+      const {data,error}=await storage.download(path);
+      if(error) throw error;
+      if(!data) throw new Error('CV_DOWNLOAD_EMPTY');
+      return await data.arrayBuffer();
+    }catch(firstError){
+      console.warn('[ATS V2.4 report] storage.download failed, trying signed URL',firstError);
+      if(typeof window.getSignedCvUrlV24 === 'function'){
+        const signed=await window.getSignedCvUrlV24(c.cv_path,true);
+        const r=await fetch(signed,{cache:'no-store'});
+        if(!r.ok) throw new Error('CV_SIGNED_FETCH_'+r.status);
+        return await r.arrayBuffer();
+      }
+      throw firstError;
+    }
+  }
+
+  async function mergeCv24(reportBytes,c){
+    if(!c?.cv_path || cvExtReport24(c.cv_path)!=='pdf'){
+      return {bytes:new Uint8Array(reportBytes),cvMerged:false,warning:c?.cv_path?'CV bukan PDF sehingga tidak dapat digabung otomatis.':'CV belum tersedia.'};
+    }
+    const PDFLib=await ensurePdfLib24();
+    const out=await PDFLib.PDFDocument.load(reportBytes);
+    const cvData=await cvBytes24(c);
+    const cv=await PDFLib.PDFDocument.load(cvData,{ignoreEncryption:true});
+    const pages=await out.copyPages(cv,cv.getPageIndices());
+    pages.forEach(p=>out.addPage(p));
+    const bytes=await out.save();
+    return {bytes,cvMerged:true,warning:null};
+  }
+
+  async function buildUnifiedBlob24(appId){
+    const d=await reportData24(appId);
+    const doc=await buildReportPdf24(d);
+    const reportBytes=doc.output('arraybuffer');
+    let merged={bytes:new Uint8Array(reportBytes),cvMerged:false,warning:null};
+    if(d.c.cv_path){
+      try{ merged=await mergeCv24(reportBytes,d.c); }
+      catch(e){
+        console.error('[ATS V2.4 report] CV merge failed',e);
+        merged={bytes:new Uint8Array(reportBytes),cvMerged:false,warning:'CV tercatat tetapi tidak dapat digabung. Laporan utama tetap dibuat.'};
+      }
+    }
+    const blob=new Blob([merged.bytes],{type:'application/pdf'});
+    const safeName=safe24(d.c.candidate_name||'Kandidat').replace(/[^a-z0-9]+/gi,'_').replace(/^_+|_+$/g,'')||'Kandidat';
+    return {blob,name:`Laporan_Seleksi_Kandidat_${safeName}.pdf`,warning:merged.warning,cvMerged:merged.cvMerged,data:d};
+  }
+
+  function revokeCurrent24(){
+    if(REPORT.currentUrl){ try{URL.revokeObjectURL(REPORT.currentUrl);}catch(_){} }
+    REPORT.currentUrl=null; REPORT.currentBlob=null; REPORT.currentName=null; REPORT.currentAppId=null;
+  }
+
+  function closePreview24(){ revokeCurrent24(); try{ closeModal(); }catch(_){} }
+
+  function downloadCurrent24(){
+    if(!REPORT.currentBlob || !REPORT.currentName) return toast24('Preview laporan belum siap.','warning');
+    const u=URL.createObjectURL(REPORT.currentBlob); const a=document.createElement('a');
+    a.href=u; a.download=REPORT.currentName; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=>URL.revokeObjectURL(u),1500);
+    toast24('Laporan PDF gabungan diunduh.','success');
+  }
+
+  function openCurrent24(){
+    if(!REPORT.currentUrl) return toast24('Preview laporan belum siap.','warning');
+    window.open(REPORT.currentUrl,'_blank','noopener');
+  }
+
+  async function previewUnified24(appId){
+    try{
+      const m=document.getElementById('modalContent'); if(m)m.className='bg-white rounded-2xl shadow-2xl w-full max-w-6xl max-h-[96vh] overflow-hidden';
+      openModal(`<div class="p-6"><div class="flex justify-between items-start gap-3"><div><div class="text-[10px] uppercase tracking-wider text-indigo-500 font-bold">Candidate Assessment Report</div><h3 class="font-bold text-xl">Menyiapkan preview laporan...</h3><p class="text-xs text-slate-500 mt-1">Laporan, hasil seleksi, dan CV PDF akan dijadikan satu dokumen.</p></div><button onclick="closeModal()" class="text-slate-400 text-xl">x</button></div><div class="mt-8 flex items-center justify-center h-52 text-slate-500"><i class="fas fa-spinner fa-spin mr-2"></i> Membuat PDF...</div></div>`);
+      const result=await buildUnifiedBlob24(appId);
+      revokeCurrent24();
+      REPORT.currentBlob=result.blob; REPORT.currentName=result.name; REPORT.currentAppId=appId; REPORT.currentUrl=URL.createObjectURL(result.blob);
+      const warn=result.warning?`<div class="px-4 py-2 text-xs bg-amber-50 text-amber-800 border-b border-amber-100"><b>Catatan:</b> ${safe24(result.warning)}</div>`:'';
+      if(m)m.className='bg-white rounded-2xl shadow-2xl w-full max-w-6xl max-h-[96vh] overflow-hidden';
+      openModal(`<div class="flex flex-col" style="height:92vh"><div class="p-4 border-b flex flex-col md:flex-row md:items-center justify-between gap-3"><div><div class="text-[10px] uppercase tracking-wider text-indigo-500 font-bold">Preview sebelum download</div><h3 class="font-bold text-lg">${safe24(result.name)}</h3><p class="text-xs text-slate-500">${result.cvMerged?'CV PDF sudah tergabung sebagai lampiran.':'Laporan dibuat sebagai satu PDF.'}</p></div><div class="flex flex-wrap gap-2"><button onclick="openUnifiedReportNewTabV24()" class="px-3 py-2 border rounded-lg text-sm">Buka Tab Baru</button><button onclick="downloadUnifiedReportV24()" class="px-3 py-2 bg-slate-900 text-white rounded-lg text-sm"><i class="fas fa-download mr-1"></i>Download PDF</button><button onclick="closeUnifiedReportPreviewV24()" class="px-3 py-2 border rounded-lg text-sm">Tutup</button></div></div>${warn}<iframe src="${REPORT.currentUrl}#toolbar=1&navpanes=0" class="w-full flex-1 border-0 bg-slate-100" title="Preview Laporan Kandidat"></iframe></div>`);
+    }catch(e){
+      console.error('[ATS V2.4 report] preview failed',e);
+      toast24('Laporan gagal dibuat. Muat ulang Tracker lalu coba kembali.','danger');
+      try{closeModal();}catch(_){}
+    }
+  }
+
+  function decorateButtons24(){
+    document.querySelectorAll('[onclick*="downloadCandidatePackage"]').forEach(el=>{
+      el.innerHTML='<i class="fas fa-file-pdf mr-1"></i>Preview Laporan Gabungan';
+      el.title='Preview laporan kandidat sebelum download';
+    });
+    document.querySelectorAll('[onclick*="downloadInterviewReport"]').forEach(el=>{
+      el.innerHTML='<i class="fas fa-file-pdf mr-1"></i>Preview Laporan PDF';
+      el.title='Preview Candidate Assessment Report';
+    });
+  }
+
+  window.downloadCandidatePackage=previewUnified24;
+  window.downloadInterviewReport=previewUnified24;
+
+  Object.assign(window,{
+    previewUnifiedCandidateReportV24:previewUnified24,
+    downloadUnifiedReportV24:downloadCurrent24,
+    openUnifiedReportNewTabV24:openCurrent24,
+    closeUnifiedReportPreviewV24:closePreview24,
+    buildUnifiedCandidateReportV24:buildUnifiedBlob24
+  });
+
+  const obs=new MutationObserver(()=>decorateButtons24());
+  obs.observe(document.body,{subtree:true,childList:true});
+  document.addEventListener('DOMContentLoaded',()=>setTimeout(decorateButtons24,1300));
+  setTimeout(decorateButtons24,800);
+
+  console.log('%cRecruitment ATS V2.4 Phase B1.1 Unified Candidate Report active','color:#4f46e5;font-weight:bold');
+})();
