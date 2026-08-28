@@ -15,7 +15,7 @@
   if(window.__ATS_CANDIDATE_DOSSIER_V1_ACTIVE) return;
   window.__ATS_CANDIDATE_DOSSIER_V1_ACTIVE = true;
 
-  const VERSION='1.0.1-preview';
+  const VERSION='1.0.3-preview';
   const state={lastModel:null,lastAppId:null};
   const TEST_LABELS={CIFT:'Tes Kognitif',PAPIKOSTIK:'PAPI Kostick',INTEGRITY:'Tes Integritas',MSDT:'MSDT',DISC:'DISC',OVERALL:'Kesimpulan'};
 
@@ -132,6 +132,12 @@
     return r?.recommendation||'—';
   }
 
+  function isLegacyDerivedInterviewSummary(text){
+    const value=String(text||'').trim();
+    if(!value)return false;
+    return /level\s+risiko\s*(rendah|sedang|tinggi)/i.test(value)||/skor\s+interview\s*\d+(?:[.,]\d+)?\/100.*red\s+flag\s+tercatat/i.test(value);
+  }
+
   function normalizeScreening(rpc){
     if(rpc.state==='error')return{state:'error',error:rpc.error,data:null};
     if(!rpc.data?.exists)return{state:'not_available',error:null,data:null};
@@ -241,6 +247,20 @@
     return{label:`PROSES BERJALAN · ${stage||'Tahap belum tersedia'}`,tone:'slate'};
   }
 
+  function historyCompleteness(model){
+    const order={
+      'Lamaran Masuk':0,'Screening CV':1,'Screening HR':2,'Psikotes':3,
+      'Interview HR':4,'Interview User':5,'Offering':6,'Interview Final':6,
+      'Medical Check Up':6,'Diterima':7,'Talent Pool':7,'Tidak Lanjut':7
+    };
+    const stage=String(model.application?.current_stage||'').trim();
+    const current=Object.prototype.hasOwnProperty.call(order,stage)?order[stage]:null;
+    const notes=[];
+    if(current!==null&&current>2&&model.screening.state==='not_available')notes.push('Kandidat sudah berada setelah tahap Screening, namun hasil Screening tersimpan tidak ditemukan pada sumber assessment saat dossier dibuat.');
+    if(current!==null&&current>3&&model.psych.state==='not_available')notes.push('Kandidat sudah berada setelah tahap Psikotes, namun sesi/hasil Psikotes tersimpan tidak ditemukan pada sumber assessment saat dossier dibuat.');
+    return notes;
+  }
+
   function synthesis(model){
     const lines=[];const concerns=[];
     const s=model.screening.data,p=model.psych.data,hr=model.hrInterview.data,u=model.userInterview.data,o=model.offering.data;
@@ -278,6 +298,7 @@
       attachments:{cvAvailable:!!candidate.cv_path,cvPath:candidate.cv_path||null,psychDocuments:[]}
     };
     model.attachments.psychDocuments=model.psych.data?.documents||[];
+    model.historyNotes=historyCompleteness(model);
     model.overall=overallStatus(model);
     model.synthesis=synthesis(model);
     return model;
@@ -290,10 +311,10 @@
   function errorState(obj){return`<div class="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900"><b>Data tidak dapat dimuat.</b><div class="text-xs mt-1">${esc(obj?.error?.message||'Terjadi error saat membaca sumber data.')}</div></div>`;}
   function kv(label,value){if(!present(value))return'';return`<div class="rounded-xl bg-slate-50 p-3"><div class="text-[10px] uppercase tracking-wide text-slate-400">${esc(label)}</div><div class="text-sm font-semibold mt-1 break-words">${esc(value)}</div></div>`;}
 
-  function statusCard(label,state,value,sub){
+  function statusCard(label,state,value,sub,notAvailableText='Belum tersedia'){
     let tone='slate',text=value||'Belum tersedia';
     if(state==='error'){tone='amber';text='Data tidak dapat dimuat';}
-    else if(state==='not_available'){tone='slate';text='Belum dilakukan';}
+    else if(state==='not_available'){tone='slate';text=notAvailableText;}
     else if(/Tidak Lanjut|Tidak Lolos|Ditolak|Dibatalkan/i.test(text))tone='red';
     else if(/Lanjut|Lolos|Diterima/i.test(text))tone='emerald';
     else if(/Review|Menunggu|Offering/i.test(text))tone='amber';
@@ -301,7 +322,7 @@
   }
 
   function renderScreening(model){
-    const block=model.screening;if(block.state==='error')return errorState(block);if(block.state==='not_available')return emptyState('Screening belum dilakukan atau belum memiliki hasil tersimpan.');
+    const block=model.screening;if(block.state==='error')return errorState(block);if(block.state==='not_available')return emptyState('Tidak ditemukan hasil Screening tersimpan untuk application ini.');
     const s=block.data,detail=s.details;
     const header=`<div class="grid md:grid-cols-4 gap-2">${kv('Hasil Sistem',s.systemStatus)}${kv('Match Preference',s.matchScore==null?null:Number(s.matchScore).toFixed(1)+'%')}${kv('Keputusan HR',s.reviewDecision)}${kv('Tanggal Screening',fmtDate(s.screenedAt))}</div>${s.reviewNotes?`<div class="mt-3 rounded-xl bg-indigo-50 border border-indigo-100 p-4 text-sm"><b>Catatan Review HR</b><div class="mt-1 text-slate-700">${esc(s.reviewNotes)}</div>${s.reviewedBy||s.reviewedAt?`<div class="text-[11px] text-slate-500 mt-2">${esc(s.reviewedBy||'Reviewer tidak tercatat')} · ${esc(fmtDate(s.reviewedAt))}</div>`:''}</div>`:''}`;
     if(!detail.length)return header+emptyState('Tidak ada detail rule screening tersimpan.');
@@ -309,15 +330,19 @@
   }
 
   function renderPsych(model){
-    const block=model.psych;if(block.state==='error')return errorState(block);if(block.state==='not_available')return emptyState('Psikotes belum dilakukan atau belum memiliki sesi tersimpan.');
+    const block=model.psych;if(block.state==='error')return errorState(block);if(block.state==='not_available')return emptyState('Tidak ditemukan sesi Psikotes tersimpan untuk application ini.');
     const p=block.data,packageText=p.package.map(x=>TEST_LABELS[x.test_code]||x.test_code).filter(Boolean).join(' · ');
-    return`<div class="grid md:grid-cols-4 gap-2">${kv('Status',p.status)}${kv('Attempt',p.attemptNo)}${kv('Selesai',fmtDate(p.completedAt))}${kv('Paket Tes',packageText||'—')}</div><div class="grid md:grid-cols-2 gap-3 mt-3"><div class="rounded-xl bg-slate-50 p-4"><div class="text-[10px] uppercase text-slate-400">Rekomendasi Engine</div><div class="font-semibold mt-1">${esc(p.engineRecommendation||'—')}</div></div><div class="rounded-xl bg-slate-50 p-4"><div class="text-[10px] uppercase text-slate-400">Keputusan HR</div><div class="font-semibold mt-1">${esc(p.workflowDecision||'—')}</div>${p.hrNotes?`<div class="text-xs text-slate-600 mt-2">${esc(p.hrNotes)}</div>`:''}</div></div>${p.results.length?`<div class="space-y-2 mt-4">${p.results.filter(x=>x.code!=='OVERALL').map(r=>`<div class="border rounded-xl p-4"><div class="flex justify-between gap-3"><b class="text-sm">${esc(r.label)}</b><span class="text-sm font-bold">${esc(r.value)}</span></div>${r.interpretation?`<p class="text-xs leading-5 text-slate-600 mt-2">${esc(r.interpretation)}</p>`:''}</div>`).join('')}</div>`:emptyState('Hasil per tes belum tersedia.')}`;
+    const finished=p.status==='Selesai';
+    const hrDecision=finished?(p.workflowDecision||'Perlu Review HR'):'Belum Ada';
+    const engineValue=finished?(p.engineRecommendation||'—'):'—';
+    const hrNote=finished&&p.hrNotes?`<div class="text-xs text-slate-600 mt-2">${esc(p.hrNotes)}</div>`:'';
+    return`<div class="grid md:grid-cols-4 gap-2">${kv('Status',p.status)}${kv('Attempt',p.attemptNo)}${kv('Selesai',fmtDate(p.completedAt))}${kv('Paket Tes',packageText||'—')}</div><div class="grid md:grid-cols-2 gap-3 mt-3"><div class="rounded-xl bg-slate-50 p-4"><div class="text-[10px] uppercase text-slate-400">Rekomendasi Engine</div><div class="font-semibold mt-1">${esc(engineValue)}</div></div><div class="rounded-xl bg-slate-50 p-4"><div class="text-[10px] uppercase text-slate-400">Keputusan HR</div><div class="font-semibold mt-1">${esc(hrDecision)}</div>${hrNote}</div></div>${p.results.length?`<div class="space-y-2 mt-4">${p.results.filter(x=>x.code!=='OVERALL').map(r=>`<div class="border rounded-xl p-4"><div class="flex justify-between gap-3"><b class="text-sm">${esc(r.label)}</b><span class="text-sm font-bold">${esc(r.value)}</span></div>${r.interpretation?`<p class="text-xs leading-5 text-slate-600 mt-2">${esc(r.interpretation)}</p>`:''}</div>`).join('')}</div>`:emptyState('Hasil per tes belum tersedia.')}`;
   }
 
   function renderInterview(block,label){
     if(block.state==='not_available')return emptyState(`${label} belum memiliki scorecard tersimpan.`);
     const d=block.data,analysisParts=[];
-    if(d.storedSummary)analysisParts.push(`<div class="rounded-xl bg-slate-900 text-white p-4"><div class="text-[10px] uppercase tracking-wider text-slate-300">Analisis Tersimpan</div><p class="text-sm leading-6 mt-2">${esc(d.storedSummary)}</p></div>`);
+    if(d.storedSummary&&!isLegacyDerivedInterviewSummary(d.storedSummary))analysisParts.push(`<div class="rounded-xl bg-slate-900 text-white p-4"><div class="text-[10px] uppercase tracking-wider text-slate-300">Analisis Tersimpan</div><p class="text-sm leading-6 mt-2">${esc(d.storedSummary)}</p></div>`);
     if(d.storedStrengths.length||d.storedGaps.length)analysisParts.push(`<div class="grid md:grid-cols-2 gap-3"><div class="rounded-xl border border-emerald-100 bg-emerald-50 p-4"><div class="text-xs font-bold text-emerald-700">Kekuatan Tersimpan</div>${d.storedStrengths.length?`<ul class="text-xs mt-2 space-y-1">${d.storedStrengths.map(x=>`<li>• ${esc(x)}</li>`).join('')}</ul>`:'<div class="text-xs mt-2">Tidak ada strengths tersimpan.</div>'}</div><div class="rounded-xl border border-amber-100 bg-amber-50 p-4"><div class="text-xs font-bold text-amber-700">Gap Tersimpan</div>${d.storedGaps.length?`<ul class="text-xs mt-2 space-y-1">${d.storedGaps.map(x=>`<li>• ${esc(x)}</li>`).join('')}</ul>`:'<div class="text-xs mt-2">Tidak ada gaps tersimpan.</div>'}</div></div>`);
     return`<div class="flex flex-col md:flex-row md:justify-between gap-3"><div><div class="font-bold">${esc(label)}</div><div class="text-xs text-slate-500 mt-1">${esc(d.interviewer||'Interviewer tidak tercatat')} · ${esc(fmtDate(d.assessedAt))}</div></div><div class="flex flex-wrap items-start gap-2">${d.score?pill(d.score.label,'slate'):''}${d.recommendation?pill(`Rekomendasi: ${d.recommendation}`,'blue'):''}${d.workflowDecision?pill(`Workflow: ${d.workflowDecision}`,/Tidak Lanjut/i.test(d.workflowDecision)?'red':/Lanjut/i.test(d.workflowDecision)?'emerald':'amber'):''}</div></div><div class="space-y-3 mt-4">${analysisParts.join('')}${d.cvVerification?`<div class="border rounded-xl p-4"><b class="text-xs">Verifikasi CV / Profil</b><p class="text-xs leading-5 text-slate-600 mt-2">${esc(d.cvVerification)}</p></div>`:''}${d.firstImpression.length?`<div class="overflow-x-auto border rounded-xl"><table class="w-full text-xs"><thead class="bg-slate-50"><tr><th class="text-left p-3">First Impression</th><th class="text-center p-3">Skor</th><th class="text-left p-3">Catatan</th></tr></thead><tbody>${d.firstImpression.map(x=>`<tr class="border-t"><td class="p-3 font-medium">${esc(x.name||'—')}</td><td class="p-3 text-center">${esc(x.score||'—')}${x.score?'/4':''}</td><td class="p-3">${esc(x.note||'—')}</td></tr>`).join('')}</tbody></table></div>`:''}${d.redFlags.length?`<div class="rounded-xl border border-red-100 bg-red-50 p-4"><div class="text-xs font-bold text-red-700">Red Flags Identified: ${d.redFlags.length}</div><ul class="text-xs mt-2 space-y-1">${d.redFlags.map(x=>`<li>• ${esc(x)}</li>`).join('')}</ul>${d.redFlagNotes?`<div class="mt-3 pt-3 border-t border-red-100 text-xs"><b>Klarifikasi:</b> ${esc(d.redFlagNotes)}</div>`:''}</div>`:`<div class="rounded-xl bg-slate-50 p-3 text-xs text-slate-600">Tidak ada red flag yang tercatat pada scorecard.</div>`}${d.evidence.length?`<div class="overflow-x-auto border rounded-xl"><table class="w-full text-xs"><thead class="bg-slate-50"><tr><th class="text-left p-3">Kompetensi</th><th class="text-center p-3">Skor</th><th class="text-left p-3">Evidence</th></tr></thead><tbody>${d.evidence.map(x=>`<tr class="border-t"><td class="p-3 font-medium">${esc(x.competency_name||'—')}</td><td class="p-3 text-center">${present(x.score)?esc(x.score)+'/4':'BT'}</td><td class="p-3 text-slate-600">${esc(x.evidence||'—')}</td></tr>`).join('')}</tbody></table></div>`:''}${d.conclusion?`<div class="border rounded-xl p-4"><b class="text-xs">Kesimpulan Interviewer</b><p class="text-xs leading-5 text-slate-600 mt-2">${esc(d.conclusion)}</p></div>`:''}${d.workflowReviewedAt||d.workflowReviewNotes?`<div class="rounded-xl border border-indigo-100 bg-indigo-50 p-4 text-xs"><b>Review Workflow</b>${d.workflowReviewedBy?` · ${esc(d.workflowReviewedBy)}`:''}${d.workflowReviewedAt?` · ${esc(fmtDate(d.workflowReviewedAt))}`:''}${d.workflowReviewNotes?`<div class="mt-2">${esc(d.workflowReviewNotes)}</div>`:''}</div>`:''}</div>`;
   }
@@ -337,8 +362,9 @@
     const profile=[['Pendidikan',c.education],['Jurusan',c.major],['Domisili',c.city],['Pengalaman',present(c.experience)?`${c.experience}${Number.isFinite(Number(c.experience))?' tahun':''}`:null],['Posisi Terakhir',c.last_role],['Perusahaan Terakhir',c.last_company],['Expected Salary',present(c.expected_salary)?money(c.expected_salary):null],['Notice Period',c.notice_period],['Bersedia Shift',c.willing_shift],['Alasan Melamar',c.apply_reason],['CV',c.cv_path?'Tersedia':'Belum tersedia']].filter(([,v])=>present(v));
     const overall=model.overall;
     const cover=`<div class="rounded-2xl overflow-hidden border border-slate-200 bg-white"><div class="bg-slate-950 text-white p-6"><div class="text-[10px] uppercase tracking-[.22em] text-slate-300">Candidate Dossier · Internal Recruitment</div><div class="flex flex-col lg:flex-row lg:items-end justify-between gap-4 mt-3"><div><h2 class="text-2xl md:text-3xl font-black">${esc(c.candidate_name||'—')}</h2><div class="text-sm text-slate-300 mt-1">${esc(p?.position_name||'—')} · ${esc(co?.brand||co?.company_name||'—')}</div></div>${pill(overall.label,overall.tone)}</div></div><div class="p-5 grid md:grid-cols-4 gap-2">${kv('Candidate ID',c.candidate_id)}${kv('Application ID',a.application_id)}${kv('Tahap Saat Ini',a.current_stage)}${kv('Status Application',a.status)}${kv('Source',c.source||a.source)}${kv('Tanggal Lamar',fmtDateOnly(a.application_date||a.applied_at||a.created_at))}</div></div>`;
-    const exec=`<div class="grid md:grid-cols-2 xl:grid-cols-5 gap-2">${statusCard('Screening',s.state,s.data?.reviewDecision||s.data?.systemStatus)}${statusCard('Psikotes',psy.state,psy.data?.status==='Selesai'?(psy.data?.workflowDecision||'Perlu Review HR'):psy.data?.status,psy.data?.status==='Selesai'&&psy.data?.engineRecommendation?`Engine: ${psy.data.engineRecommendation}`:'')}${statusCard('Interview HR',hr.state,hr.data?.workflowDecision||hr.data?.recommendation,hr.data?.score?.label)}${statusCard('Interview User',u.state,u.data?.workflowDecision||u.data?.recommendation,u.data?.score?.label)}${statusCard('Offering',o.state,o.data?.status)}</div><div class="rounded-xl border ${toneClass(overall.tone)} p-4 mt-4"><div class="text-[10px] uppercase tracking-wide opacity-70">Overall Recruitment Recommendation</div><div class="text-lg font-black mt-1">${esc(overall.label)}</div><div class="text-xs mt-3 space-y-1">${model.synthesis.lines.map(x=>`<p>${esc(x)}</p>`).join('')}</div></div>`;
-    const conclusion=`<div class="rounded-xl border ${toneClass(overall.tone)} p-5"><div class="text-[10px] uppercase tracking-wide opacity-70">Keputusan / Posisi Workflow Resmi</div><div class="text-xl font-black mt-1">${esc(overall.label)}</div><div class="mt-4"><div class="text-xs font-bold">Evidence Chain</div><ul class="text-sm mt-2 space-y-1">${model.synthesis.lines.map(x=>`<li>• ${esc(x)}</li>`).join('')}</ul></div>${model.synthesis.concerns.length?`<div class="mt-4 pt-4 border-t border-current/10"><div class="text-xs font-bold">Concern / Catatan Tersimpan</div><ul class="text-xs mt-2 space-y-1">${model.synthesis.concerns.map(x=>`<li>• ${esc(x)}</li>`).join('')}</ul></div>`:'<div class="text-xs mt-4 opacity-70">Tidak ada concern tambahan yang dapat ditarik langsung dari field tersimpan.</div>'}<p class="text-[10px] mt-4 opacity-70">Dossier tidak menghitung rata-rata Interview HR + User sebagai keputusan dan tidak menambahkan fakta assessment di luar data tersimpan.</p></div>`;
+    const exec=`<div class="grid md:grid-cols-2 xl:grid-cols-5 gap-2">${statusCard('Screening',s.state,s.data?.reviewDecision||s.data?.systemStatus,'','Data tidak ditemukan')}${statusCard('Psikotes',psy.state,psy.data?.status==='Selesai'?(psy.data?.workflowDecision||'Perlu Review HR'):psy.data?.status,psy.data?.status==='Selesai'&&psy.data?.engineRecommendation?`Engine: ${psy.data.engineRecommendation}`:'','Data tidak ditemukan')}${statusCard('Interview HR',hr.state,hr.data?.workflowDecision||hr.data?.recommendation,hr.data?.score?.label,'Belum ada scorecard')}${statusCard('Interview User',u.state,u.data?.workflowDecision||u.data?.recommendation,u.data?.score?.label,'Belum ada scorecard')}${statusCard('Offering',o.state,o.data?.status,'','Belum dibuat')}</div><div class="rounded-xl border ${toneClass(overall.tone)} p-4 mt-4"><div class="text-[10px] uppercase tracking-wide opacity-70">Overall Recruitment Recommendation</div><div class="text-lg font-black mt-1">${esc(overall.label)}</div><div class="text-xs mt-3 space-y-1">${model.synthesis.lines.map(x=>`<p>${esc(x)}</p>`).join('')}</div></div>`;
+    const historyNotice=model.historyNotes?.length?`<div class="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4"><div class="text-xs font-bold text-slate-700">Kelengkapan Histori</div><ul class="text-xs text-slate-600 mt-2 space-y-1">${model.historyNotes.map(x=>`<li>• ${esc(x)}</li>`).join('')}</ul></div>`:'';
+    const conclusion=`<div class="rounded-xl border ${toneClass(overall.tone)} p-5"><div class="text-[10px] uppercase tracking-wide opacity-70">Keputusan / Posisi Workflow Resmi</div><div class="text-xl font-black mt-1">${esc(overall.label)}</div><div class="mt-4"><div class="text-xs font-bold">Evidence Chain</div><ul class="text-sm mt-2 space-y-1">${model.synthesis.lines.map(x=>`<li>• ${esc(x)}</li>`).join('')}</ul></div>${historyNotice}${model.synthesis.concerns.length?`<div class="mt-4 pt-4 border-t border-current/10"><div class="text-xs font-bold">Concern / Catatan Tersimpan</div><ul class="text-xs mt-2 space-y-1">${model.synthesis.concerns.map(x=>`<li>• ${esc(x)}</li>`).join('')}</ul></div>`:'<div class="text-xs mt-4 opacity-70">Tidak ada concern tambahan yang dapat ditarik langsung dari field tersimpan.</div>'}<p class="text-[10px] mt-4 opacity-70">Dossier tidak menghitung rata-rata Interview HR + User sebagai keputusan dan tidak menambahkan fakta assessment di luar data tersimpan.</p></div>`;
     const attachments=`<div class="grid md:grid-cols-2 gap-3"><div class="border rounded-xl p-4"><div class="text-xs font-bold">CV Kandidat</div><div class="text-sm mt-1">${model.attachments.cvAvailable?'Tersedia':'Belum tersedia'}</div>${model.attachments.cvAvailable?`<button onclick="openCandidateCV('${esc(c.candidate_id)}')" class="mt-3 px-3 py-2 border rounded-lg text-xs font-semibold">Buka CV</button>`:''}</div><div class="border rounded-xl p-4"><div class="text-xs font-bold">Dokumen Psikotes</div>${model.attachments.psychDocuments.length?`<div class="mt-2 space-y-2">${model.attachments.psychDocuments.map(d=>d.storagePath?`<button onclick="openPsychDocV2('${esc(d.storagePath)}')" class="block text-xs text-primary-700 underline">${esc(d.fileName)}</button>`:`<div class="text-xs">${esc(d.fileName)}</div>`).join('')}</div>`:'<div class="text-sm text-slate-500 mt-1">Belum ada dokumen tersimpan.</div>'}</div></div>`;
     return`<div id="candidateDossierPreviewV1" class="space-y-5">${cover}${section('B','Executive Recruitment Summary',exec,'Ringkasan status resmi tiap tahap; bukan rata-rata skor.')}${section('C','Candidate Profile',profile.length?`<div class="grid md:grid-cols-3 gap-2">${profile.map(([k,v])=>kv(k,v)).join('')}</div>`:emptyState('Profil terstruktur kandidat belum tersedia.'))}${section('D','Screening',renderScreening(model),'System result dipisahkan dari keputusan/review HR.')}${section('E','Psychotest',renderPsych(model),'Interpretasi hanya menggunakan hasil yang tersimpan dari SiPsiko.')}${section('F','Interview HR',renderInterview(hr,'Interview HR'),'Rekomendasi interviewer dipisahkan dari keputusan workflow.')}${section('G','Interview User',renderInterview(u,'Interview User'),'Evidence dan recommendation dari scorecard User.')}${section('H','Integrated Assessment Conclusion',conclusion,'Sintesis deterministik dari evidence chain yang tersedia.')}${section('I','Offering',renderOffering(model))}${section('J','Recruitment Timeline',renderTimeline(model),'Hanya event yang benar-benar tersimpan; stage yang tidak ada tidak diinferensikan.')}${section('K','CV & Attachments',attachments,'Dossier tidak bergantung pada keberhasilan fetch CV.')}</div>`;
   }
