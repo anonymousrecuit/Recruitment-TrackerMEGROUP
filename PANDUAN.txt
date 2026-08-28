@@ -1,0 +1,13 @@
+PATCH TEST BRANCH ONLY - feature/candidate-dossier-v1
+
+1. Upload ATS_Psych_Queue_Fix_V1.js ke branch feature/candidate-dossier-v1.
+2. Replace Candidate_Dossier_V1.js di branch yang sama dengan versi dalam paket ini.
+3. Edit index.html agar urutan script paling bawah menjadi:
+
+<script src="./ATS_V24_Supabase_Compatibility.js"></script>
+<script src="./ATS_V2_0_Integrated_Module.js"></script>
+<script src="./ATS_Psych_Queue_Fix_V1.js"></script>
+<script src="./Candidate_Dossier_V1.js"></script>
+
+4. Commit ke feature/candidate-dossier-v1. Jangan merge ke main.
+5. Download ZIP branch terbaru dan test ulang Antrian Seleksi > Psikotes.

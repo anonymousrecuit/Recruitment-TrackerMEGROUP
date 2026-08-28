@@ -15,7 +15,7 @@
   if(window.__ATS_CANDIDATE_DOSSIER_V1_ACTIVE) return;
   window.__ATS_CANDIDATE_DOSSIER_V1_ACTIVE = true;
 
-  const VERSION='1.0.0-preview';
+  const VERSION='1.0.1-preview';
   const state={lastModel:null,lastAppId:null};
   const TEST_LABELS={CIFT:'Tes Kognitif',PAPIKOSTIK:'PAPI Kostick',INTEGRITY:'Tes Integritas',MSDT:'MSDT',DISC:'DISC',OVERALL:'Kesimpulan'};
 
@@ -208,10 +208,34 @@
     if(status==='Diterima'||stage==='Diterima'||off?.status==='Diterima')return{label:'DITERIMA',tone:'emerald'};
     if(status==='Tidak Lanjut'||stage==='Tidak Lanjut')return{label:'TIDAK LANJUT',tone:'red'};
     if(status==='Talent Pool'||stage==='Talent Pool')return{label:'TALENT POOL',tone:'blue'};
-    const currentDecision=(stage==='Interview User'?u?.workflowDecision:stage==='Interview HR'?hr?.workflowDecision:stage==='Psikotes'?p?.workflowDecision:['Screening CV','Screening HR','Lamaran Masuk'].includes(stage)?s?.reviewDecision:null);
+
+    if(['Lamaran Masuk','Screening CV','Screening HR'].includes(stage)){
+      if(s?.reviewDecision==='Tidak Lanjut')return{label:'TIDAK LANJUT',tone:'red'};
+      if(s?.reviewDecision==='Talent Pool')return{label:'TALENT POOL',tone:'blue'};
+      if(s?.reviewDecision==='Lanjut')return{label:'LANJUT KE PSIKOTES',tone:'emerald'};
+      if(s?.systemStatus==='Perlu Review HR')return{label:'PERLU REVIEW HR',tone:'amber'};
+      if(s?.systemStatus==='Tidak Lolos Otomatis')return{label:'TIDAK LOLOS OTOMATIS',tone:'red'};
+      if(s?.systemStatus==='Lolos Otomatis')return{label:'SCREENING LOLOS · MENUNGGU TINDAKAN HR',tone:'emerald'};
+    }
+
+    if(stage==='Psikotes'){
+      const psychStatus=String(p?.status||'').trim();
+      if(psychStatus==='Belum Dimulai')return{label:'PSIKOTES BELUM DIMULAI',tone:'slate'};
+      if(psychStatus==='Dalam Proses')return{label:'PSIKOTES DALAM PROSES',tone:'blue'};
+      if(['Kedaluwarsa','Dibatalkan'].includes(psychStatus))return{label:`PSIKOTES ${psychStatus.toUpperCase()}`,tone:'red'};
+      if(psychStatus==='Selesai'){
+        if(p?.workflowDecision==='Tidak Lanjut')return{label:'TIDAK LANJUT',tone:'red'};
+        if(p?.workflowDecision==='Talent Pool')return{label:'TALENT POOL',tone:'blue'};
+        if(p?.workflowDecision==='Lanjut')return{label:'LANJUT KE INTERVIEW HR',tone:'emerald'};
+        return{label:'PERLU REVIEW HR',tone:'amber'};
+      }
+      return{label:'PSIKOTES · MENUNGGU STATUS',tone:'slate'};
+    }
+
+    const currentDecision=stage==='Interview User'?u?.workflowDecision:stage==='Interview HR'?hr?.workflowDecision:null;
     if(currentDecision==='Tidak Lanjut')return{label:'TIDAK LANJUT',tone:'red'};
     if(currentDecision==='Talent Pool')return{label:'TALENT POOL',tone:'blue'};
-    if(currentDecision==='Perlu Review HR'||(s?.systemStatus==='Perlu Review HR'&&!s?.reviewDecision))return{label:'PERLU REVIEW HR',tone:'amber'};
+    if(currentDecision==='Perlu Review HR')return{label:'PERLU REVIEW HR',tone:'amber'};
     if(currentDecision==='Lanjut')return{label:`LANJUT · ${stage||'Workflow Aktif'}`,tone:'emerald'};
     if(off?.status)return{label:`OFFERING · ${off.status}`,tone:['Ditolak','Dibatalkan','Kadaluarsa'].includes(off.status)?'red':'amber'};
     return{label:`PROSES BERJALAN · ${stage||'Tahap belum tersedia'}`,tone:'slate'};
@@ -221,7 +245,11 @@
     const lines=[];const concerns=[];
     const s=model.screening.data,p=model.psych.data,hr=model.hrInterview.data,u=model.userInterview.data,o=model.offering.data;
     if(s){lines.push(`Screening sistem: ${s.systemStatus||'belum ada status'}${s.reviewDecision?`; keputusan HR: ${s.reviewDecision}`:''}.`);if(s.reviewNotes)concerns.push(`Screening HR: ${s.reviewNotes}`);}
-    if(p){lines.push(`Psikotes: ${p.status||'status tidak tersedia'}${p.engineRecommendation?`; rekomendasi engine: ${p.engineRecommendation}`:''}${p.workflowDecision?`; keputusan HR: ${p.workflowDecision}`:''}.`);if(p.hrNotes)concerns.push(`Catatan HR psikotes: ${p.hrNotes}`);}
+    if(p){
+      const psychFinished=p.status==='Selesai';
+      lines.push(`Psikotes: ${p.status||'status tidak tersedia'}${psychFinished&&p.engineRecommendation?`; rekomendasi engine: ${p.engineRecommendation}`:''}${psychFinished&&p.workflowDecision?`; keputusan HR: ${p.workflowDecision}`:''}.`);
+      if(psychFinished&&p.hrNotes)concerns.push(`Catatan HR psikotes: ${p.hrNotes}`);
+    }
     if(hr){lines.push(`Interview HR${hr.recommendation?` merekomendasikan ${hr.recommendation}`:''}${hr.workflowDecision?`; keputusan workflow: ${hr.workflowDecision}`:''}.`);hr.redFlags.forEach(x=>concerns.push(`Interview HR red flag: ${x}`));if(hr.workflowReviewNotes)concerns.push(`Review workflow HR: ${hr.workflowReviewNotes}`);}
     if(u){lines.push(`Interview User${u.recommendation?` merekomendasikan ${u.recommendation}`:''}${u.workflowDecision?`; keputusan workflow: ${u.workflowDecision}`:''}.`);u.redFlags.forEach(x=>concerns.push(`Interview User red flag: ${x}`));if(u.workflowReviewNotes)concerns.push(`Review workflow User: ${u.workflowReviewNotes}`);}
     if(o)lines.push(`Offering: ${o.status||'status tidak tersedia'}${o.expectedJoinDate?`; rencana join ${fmtDateOnly(o.expectedJoinDate)}`:''}.`);
@@ -309,7 +337,7 @@
     const profile=[['Pendidikan',c.education],['Jurusan',c.major],['Domisili',c.city],['Pengalaman',present(c.experience)?`${c.experience}${Number.isFinite(Number(c.experience))?' tahun':''}`:null],['Posisi Terakhir',c.last_role],['Perusahaan Terakhir',c.last_company],['Expected Salary',present(c.expected_salary)?money(c.expected_salary):null],['Notice Period',c.notice_period],['Bersedia Shift',c.willing_shift],['Alasan Melamar',c.apply_reason],['CV',c.cv_path?'Tersedia':'Belum tersedia']].filter(([,v])=>present(v));
     const overall=model.overall;
     const cover=`<div class="rounded-2xl overflow-hidden border border-slate-200 bg-white"><div class="bg-slate-950 text-white p-6"><div class="text-[10px] uppercase tracking-[.22em] text-slate-300">Candidate Dossier · Internal Recruitment</div><div class="flex flex-col lg:flex-row lg:items-end justify-between gap-4 mt-3"><div><h2 class="text-2xl md:text-3xl font-black">${esc(c.candidate_name||'—')}</h2><div class="text-sm text-slate-300 mt-1">${esc(p?.position_name||'—')} · ${esc(co?.brand||co?.company_name||'—')}</div></div>${pill(overall.label,overall.tone)}</div></div><div class="p-5 grid md:grid-cols-4 gap-2">${kv('Candidate ID',c.candidate_id)}${kv('Application ID',a.application_id)}${kv('Tahap Saat Ini',a.current_stage)}${kv('Status Application',a.status)}${kv('Source',c.source||a.source)}${kv('Tanggal Lamar',fmtDateOnly(a.application_date||a.applied_at||a.created_at))}</div></div>`;
-    const exec=`<div class="grid md:grid-cols-2 xl:grid-cols-5 gap-2">${statusCard('Screening',s.state,s.data?.reviewDecision||s.data?.systemStatus)}${statusCard('Psikotes',psy.state,psy.data?.workflowDecision||psy.data?.status,psy.data?.engineRecommendation?`Engine: ${psy.data.engineRecommendation}`:'')}${statusCard('Interview HR',hr.state,hr.data?.workflowDecision||hr.data?.recommendation,hr.data?.score?.label)}${statusCard('Interview User',u.state,u.data?.workflowDecision||u.data?.recommendation,u.data?.score?.label)}${statusCard('Offering',o.state,o.data?.status)}</div><div class="rounded-xl border ${toneClass(overall.tone)} p-4 mt-4"><div class="text-[10px] uppercase tracking-wide opacity-70">Overall Recruitment Recommendation</div><div class="text-lg font-black mt-1">${esc(overall.label)}</div><div class="text-xs mt-3 space-y-1">${model.synthesis.lines.map(x=>`<p>${esc(x)}</p>`).join('')}</div></div>`;
+    const exec=`<div class="grid md:grid-cols-2 xl:grid-cols-5 gap-2">${statusCard('Screening',s.state,s.data?.reviewDecision||s.data?.systemStatus)}${statusCard('Psikotes',psy.state,psy.data?.status==='Selesai'?(psy.data?.workflowDecision||'Perlu Review HR'):psy.data?.status,psy.data?.status==='Selesai'&&psy.data?.engineRecommendation?`Engine: ${psy.data.engineRecommendation}`:'')}${statusCard('Interview HR',hr.state,hr.data?.workflowDecision||hr.data?.recommendation,hr.data?.score?.label)}${statusCard('Interview User',u.state,u.data?.workflowDecision||u.data?.recommendation,u.data?.score?.label)}${statusCard('Offering',o.state,o.data?.status)}</div><div class="rounded-xl border ${toneClass(overall.tone)} p-4 mt-4"><div class="text-[10px] uppercase tracking-wide opacity-70">Overall Recruitment Recommendation</div><div class="text-lg font-black mt-1">${esc(overall.label)}</div><div class="text-xs mt-3 space-y-1">${model.synthesis.lines.map(x=>`<p>${esc(x)}</p>`).join('')}</div></div>`;
     const conclusion=`<div class="rounded-xl border ${toneClass(overall.tone)} p-5"><div class="text-[10px] uppercase tracking-wide opacity-70">Keputusan / Posisi Workflow Resmi</div><div class="text-xl font-black mt-1">${esc(overall.label)}</div><div class="mt-4"><div class="text-xs font-bold">Evidence Chain</div><ul class="text-sm mt-2 space-y-1">${model.synthesis.lines.map(x=>`<li>• ${esc(x)}</li>`).join('')}</ul></div>${model.synthesis.concerns.length?`<div class="mt-4 pt-4 border-t border-current/10"><div class="text-xs font-bold">Concern / Catatan Tersimpan</div><ul class="text-xs mt-2 space-y-1">${model.synthesis.concerns.map(x=>`<li>• ${esc(x)}</li>`).join('')}</ul></div>`:'<div class="text-xs mt-4 opacity-70">Tidak ada concern tambahan yang dapat ditarik langsung dari field tersimpan.</div>'}<p class="text-[10px] mt-4 opacity-70">Dossier tidak menghitung rata-rata Interview HR + User sebagai keputusan dan tidak menambahkan fakta assessment di luar data tersimpan.</p></div>`;
     const attachments=`<div class="grid md:grid-cols-2 gap-3"><div class="border rounded-xl p-4"><div class="text-xs font-bold">CV Kandidat</div><div class="text-sm mt-1">${model.attachments.cvAvailable?'Tersedia':'Belum tersedia'}</div>${model.attachments.cvAvailable?`<button onclick="openCandidateCV('${esc(c.candidate_id)}')" class="mt-3 px-3 py-2 border rounded-lg text-xs font-semibold">Buka CV</button>`:''}</div><div class="border rounded-xl p-4"><div class="text-xs font-bold">Dokumen Psikotes</div>${model.attachments.psychDocuments.length?`<div class="mt-2 space-y-2">${model.attachments.psychDocuments.map(d=>d.storagePath?`<button onclick="openPsychDocV2('${esc(d.storagePath)}')" class="block text-xs text-primary-700 underline">${esc(d.fileName)}</button>`:`<div class="text-xs">${esc(d.fileName)}</div>`).join('')}</div>`:'<div class="text-sm text-slate-500 mt-1">Belum ada dokumen tersimpan.</div>'}</div></div>`;
     return`<div id="candidateDossierPreviewV1" class="space-y-5">${cover}${section('B','Executive Recruitment Summary',exec,'Ringkasan status resmi tiap tahap; bukan rata-rata skor.')}${section('C','Candidate Profile',profile.length?`<div class="grid md:grid-cols-3 gap-2">${profile.map(([k,v])=>kv(k,v)).join('')}</div>`:emptyState('Profil terstruktur kandidat belum tersedia.'))}${section('D','Screening',renderScreening(model),'System result dipisahkan dari keputusan/review HR.')}${section('E','Psychotest',renderPsych(model),'Interpretasi hanya menggunakan hasil yang tersimpan dari SiPsiko.')}${section('F','Interview HR',renderInterview(hr,'Interview HR'),'Rekomendasi interviewer dipisahkan dari keputusan workflow.')}${section('G','Interview User',renderInterview(u,'Interview User'),'Evidence dan recommendation dari scorecard User.')}${section('H','Integrated Assessment Conclusion',conclusion,'Sintesis deterministik dari evidence chain yang tersedia.')}${section('I','Offering',renderOffering(model))}${section('J','Recruitment Timeline',renderTimeline(model),'Hanya event yang benar-benar tersimpan; stage yang tidak ada tidak diinferensikan.')}${section('K','CV & Attachments',attachments,'Dossier tidak bergantung pada keberhasilan fetch CV.')}</div>`;
