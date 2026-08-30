@@ -15,7 +15,7 @@
   if(window.__ATS_CANDIDATE_DOSSIER_PDF_V1_ACTIVE) return;
   window.__ATS_CANDIDATE_DOSSIER_PDF_V1_ACTIVE=true;
 
-  const VERSION='1.0.0-pdf';
+  const VERSION='1.0.1-pdf';
   const PAGE={w:210,h:297,left:14,right:14,top:23,bottom:281};
   const CONTENT_W=PAGE.w-PAGE.left-PAGE.right;
   const TEST_LABELS={CIFT:'Tes Kognitif',PAPIKOSTIK:'PAPI Kostick',INTEGRITY:'Tes Integritas',MSDT:'MSDT',DISC:'DISC',OVERALL:'Kesimpulan'};
@@ -444,8 +444,9 @@
       pdfButton.innerHTML='<i class="fas fa-file-pdf mr-1"></i>Download Dossier PDF';
       pdfButton.onclick=()=>downloadCandidateDossierPdf(window.CandidateDossierV1?.state?.lastAppId||null);
     }
-    const info=[...root.querySelectorAll('div')].find(el=>/Fase Preview:/i.test(el.textContent||'')&&/tombol PDF/i.test(el.textContent||''));
-    if(info){
+    const previewRoot=root.querySelector('#candidateDossierPreviewV1');
+    const info=previewRoot?.previousElementSibling;
+    if(info && /Fase Preview:/i.test(info.textContent||'')){
       info.innerHTML='<b>Fase PDF:</b> Preview Candidate Dossier V1.0.3 sudah tervalidasi. Download Dossier PDF A4 aktif; Paket Dokumen masih dinonaktifkan sampai PDF lolos regression.';
     }
   }
