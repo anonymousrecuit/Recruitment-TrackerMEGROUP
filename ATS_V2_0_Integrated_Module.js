@@ -18,7 +18,7 @@
     psychLoading:false,
     screeningLoading:false,
     psychUrlKey:'ats_v2_psychotest_url',
-    defaultPsychUrl:'psikotes.html'
+    defaultPsychUrl:'https://psikotesmegroupnew.netlify.app'
   };
 
   const esc=v=>typeof atsEsc==='function'?atsEsc(v):String(v??'').replace(/[&<>\"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#039;'}[ch]));
