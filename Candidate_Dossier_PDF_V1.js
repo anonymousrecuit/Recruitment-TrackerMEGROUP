@@ -1,5 +1,5 @@
 /* ========================================================================== 
-   LAPORAN KANDIDAT TERINTEGRASI PDF V1.4 - EXECUTIVE A4
+   LAPORAN KANDIDAT TERINTEGRASI PDF V1.4.1 - EXECUTIVE A4
    Branch: feature/candidate-dossier-v1
 
    Design constraints:
@@ -15,7 +15,7 @@
   if(window.__ATS_CANDIDATE_DOSSIER_PDF_V1_ACTIVE) return;
   window.__ATS_CANDIDATE_DOSSIER_PDF_V1_ACTIVE=true;
 
-  const VERSION='1.4.0-pdf';
+  const VERSION='1.4.1-pdf';
   const PAGE={w:210,h:297,left:15,right:15,top:20,bottom:282};
   const CONTENT_W=PAGE.w-PAGE.left-PAGE.right;
   const NAVY=[15,23,42], SLATE=[71,85,105], MUTED=[100,116,139], LINE=[226,232,240], SOFT=[248,250,252], BLUE=[37,99,235];
@@ -565,14 +565,16 @@
 
   function attachments(ctx){
     const m=ctx.model, docs=arr(m.attachments?.psychDocuments);
-    ensure(ctx,11);
+    const cvText=m.attachments?.cvAvailable?'CV tersedia - file asli disertakan terpisah':'CV belum tersedia';
+    const psychText=docs.length?`Psikotes: ${docs.length} dokumen tersimpan`:'Psikotes belum tersedia';
+    const labelW=31, bodyW=CONTENT_W-labelW;
+    const lines=wrap(ctx,`${cvText} · ${psychText}`,bodyW,6.35,'normal');
+    const h=Math.max(3.8,lines.length*3.05)+0.8;
+    if(ctx.y+h>PAGE.bottom)addPage(ctx);
     microLabel(ctx,'Dokumen Pendukung',PAGE.left,ctx.y);
-    ctx.y+=3.7;
-    const cvText=m.attachments?.cvAvailable?'CV: tersedia, file asli disertakan terpisah':'CV: belum tersedia';
-    const psychText=docs.length?`Psikotes: ${docs.length} dokumen tersimpan`:'Psikotes: belum tersedia';
-    const lines=wrap(ctx,`${cvText}   ·   ${psychText}`,CONTENT_W,7.1,'normal');
-    setFont(ctx,7.1,'normal',SLATE);ctx.doc.text(lines,PAGE.left,ctx.y,{baseline:'top'});
-    ctx.y+=Math.max(4.2,lines.length*3.45)+1;
+    setFont(ctx,6.35,'normal',SLATE);
+    ctx.doc.text(lines,PAGE.left+labelW,ctx.y,{baseline:'top'});
+    ctx.y+=h;
   }
 
   function renderAll(ctx){
@@ -661,7 +663,7 @@
     const previewRoot=root.querySelector('#candidateDossierPreviewV1');
     const info=previewRoot?.previousElementSibling;
     if(info && /(Fase PDF|Fase Laporan|Fase Paket Dokumen|Fase Paket)/i.test(info.textContent||'')){
-      info.innerHTML='<b>Laporan PDF V1.4:</b> final visual polish Executive Recruitment Assessment Report. Paket Dokumen tetap menggunakan PDF dan model canonical yang sama.';
+      info.innerHTML='<b>Laporan PDF V1.4.1:</b> final visual polish Executive Recruitment Assessment Report. Paket Dokumen tetap menggunakan PDF dan model canonical yang sama.';
     }
   }
 
@@ -688,5 +690,5 @@
 
   installOpenHook();
   document.addEventListener('DOMContentLoaded',()=>setTimeout(installOpenHook,1800));
-  console.log('%cLaporan Kandidat PDF V1.4 active','color:#2563eb;font-weight:bold');
+  console.log('%cLaporan Kandidat PDF V1.4.1 active','color:#2563eb;font-weight:bold');
 })();
