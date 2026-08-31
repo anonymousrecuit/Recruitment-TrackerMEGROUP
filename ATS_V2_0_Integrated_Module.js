@@ -138,7 +138,7 @@
     const code=row?.access_code||latestPsych(appId)?.access_code||'';
     const url=psychBaseUrl();
     const expiry=fmt(row?.expires_at||latestPsych(appId)?.expires_at);
-    const recruiter=(typeof currentAuthUser!=='undefined'&&currentAuthUser?.email)||(typeof currentProfile!=='undefined'&&currentProfile?.full_name)||(typeof getUser==='function'&&getUser('U04')?.name)||'HR';
+    const recruiter=(typeof currentProfile!=='undefined'&&currentProfile?.full_name)||(typeof getUser==='function'&&getUser('U04')?.name)||'HR';
     let tpl=null;
     try{tpl=typeof getWaTemplates==='function'?(getWaTemplates()||[]).find(t=>t.id==='psikotes'):null;}catch(_){}
     const map={
@@ -147,11 +147,11 @@
       brand:co?.brand||co?.company_name||'-',
       rekruter:recruiter,
       tanggal:expiry,
-      kode:`${code}\n🔗 Link: ${url}`,
+      kode:code,
       lokasi:url
     };
-    if(tpl?.body){try{return typeof fillWaTemplate==='function'?fillWaTemplate(tpl.body,map):Object.entries(map).reduce((t,[k,v])=>t.replace(new RegExp('\\{'+k+'\\}','g'),v||'-'),tpl.body);}catch(_){} }
-    return `Halo ${map.nama},\n\nTerima kasih telah melamar posisi *${map.posisi}* di *${map.brand}*.\n\nAnda diundang mengikuti *Psikotes*.\n📅 Batas pengerjaan: ${expiry}\n🔑 Kode Akses: ${code}\n🔗 Link: ${url}\n\nHormat kami,\n${recruiter}\nTim Rekrutmen ${map.brand}`;
+    if(tpl?.body){try{const raw=typeof fillWaTemplate==='function'?fillWaTemplate(tpl.body,map):Object.entries(map).reduce((t,[k,v])=>t.replace(new RegExp('\\{'+k+'\\}','g'),v||'-'),tpl.body);return String(raw||'').replace(/\uFFFD+/g,'-').replace(/[📅🔑🔗]/gu,'-').replace(/^\s*-\s*Tanggal\s*:/gim,'- Batas pengerjaan:').replace(/^\s*-\s*Kode\s*\/\s*Link\s*:/gim,'- Kode Akses:');}catch(_){} }
+    return `Halo ${map.nama},\n\nTerima kasih telah melamar posisi *${map.posisi}* di *${map.brand}*.\n\nAnda diundang mengikuti *Psikotes* dengan detail berikut:\n- Batas pengerjaan: ${expiry}\n- Kode Akses: ${code}\n- Link: ${url}\n\nMohon menyelesaikan psikotes sebelum batas waktu yang telah ditentukan.\n\nHormat kami,\n${recruiter}\nTim Rekrutmen ${map.brand}`;
   }
   function showAccessModal(appId,row){const app=appById(appId),c=candById(app?.candidate_id),code=row?.access_code||latestPsych(appId)?.access_code||'';const url=psychBaseUrl();const expiry=fmt(row?.expires_at||latestPsych(appId)?.expires_at);const msg=psychInviteMessageV22(appId,row);openModal(`<div class="p-6"><h3 class="font-bold text-lg">Akses Psikotes Kandidat</h3><p class="text-xs text-slate-500 mt-1">Pesan di bawah memakai <b>Pengaturan Proses → Template WhatsApp → Undangan Psikotes</b>. Perubahan template akan langsung dipakai pada undangan berikutnya.</p><div class="mt-4 bg-slate-50 border rounded-xl p-4"><div class="text-xs text-slate-500">Link SiPsiko</div><div class="font-mono text-sm break-all mt-1">${esc(url)}</div><div class="text-xs text-slate-500 mt-4">Kode Akses</div><div class="font-mono text-3xl font-bold tracking-[.25em] mt-1">${esc(code)}</div><div class="text-xs text-slate-400 mt-2">Berlaku s.d. ${esc(expiry)}</div></div><label class="block text-xs font-semibold text-slate-600 mt-4 mb-1">Preview Template WhatsApp</label><textarea id="v2PsychWaText" class="w-full border rounded-lg p-3 text-xs" rows="10">${esc(msg)}</textarea><div class="grid grid-cols-2 gap-2 mt-4"><button onclick="copyTextV2('${esc(url)}','Link disalin')" class="px-3 py-2 border rounded-lg text-sm">Salin Link</button><button onclick="copyTextV2('${esc(code)}','Kode disalin')" class="px-3 py-2 border rounded-lg text-sm">Salin Kode</button><button onclick="copyPsychMessageV2()" class="px-3 py-2 bg-slate-800 text-white rounded-lg text-sm">Salin Pesan</button><button onclick="openPsychWhatsAppV2('${appId}')" class="px-3 py-2 bg-green-600 text-white rounded-lg text-sm"><i class="fab fa-whatsapp mr-1"></i>WhatsApp</button></div><div class="text-right mt-3"><button onclick="closeModal()" class="px-3 py-2 border rounded-lg text-sm">Tutup</button></div></div>`);}
   async function copyText(v,msg){try{await navigator.clipboard.writeText(v);showToast(msg||'Disalin','success');}catch(_){showToast('Clipboard tidak tersedia','warning');}}
