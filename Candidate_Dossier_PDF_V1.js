@@ -1,5 +1,5 @@
 /* ========================================================================== 
-   LAPORAN KANDIDAT TERINTEGRASI PDF V1.3 - EXECUTIVE A4
+   LAPORAN KANDIDAT TERINTEGRASI PDF V1.4 - EXECUTIVE A4
    Branch: feature/candidate-dossier-v1
 
    Design constraints:
@@ -15,7 +15,7 @@
   if(window.__ATS_CANDIDATE_DOSSIER_PDF_V1_ACTIVE) return;
   window.__ATS_CANDIDATE_DOSSIER_PDF_V1_ACTIVE=true;
 
-  const VERSION='1.3.0-pdf';
+  const VERSION='1.4.0-pdf';
   const PAGE={w:210,h:297,left:15,right:15,top:20,bottom:282};
   const CONTENT_W=PAGE.w-PAGE.left-PAGE.right;
   const NAVY=[15,23,42], SLATE=[71,85,105], MUTED=[100,116,139], LINE=[226,232,240], SOFT=[248,250,252], BLUE=[37,99,235];
@@ -313,10 +313,12 @@
 
   function cover(ctx){
     const m=ctx.model,a=m.application||{},c=m.candidate||{},p=m.position||{},co=m.company||{};
-    ensure(ctx,27);
-    setFont(ctx,6.2,'bold',BLUE);ctx.doc.text('EXECUTIVE RECRUITMENT ASSESSMENT REPORT',PAGE.left,ctx.y,{baseline:'top'});
-    ctx.y+=4.5;
-    const status=clean(m.overall?.label)||clean(a.current_stage)||'Dalam Proses';
+    ensure(ctx,31);
+    setFont(ctx,7.1,'bold',NAVY);ctx.doc.text('LAPORAN KANDIDAT TERINTEGRASI',PAGE.left,ctx.y,{baseline:'top'});
+    ctx.y+=4.2;
+    setFont(ctx,6.1,'normal',MUTED);ctx.doc.text('Executive Recruitment Assessment Report',PAGE.left,ctx.y,{baseline:'top'});
+    ctx.y+=5.2;
+    const status=humanResult(clean(m.overall?.label)||clean(a.current_stage)||'Dalam Proses');
     const statusW=48;
     const nameW=CONTENT_W-statusW-6;
     setFont(ctx,16.5,'bold',NAVY);
@@ -342,24 +344,36 @@
 
   function executive(ctx){
     const m=ctx.model,a=m.application||{};
-    sectionHeading(ctx,'Ringkasan Eksekutif','Ringkasan singkat untuk keputusan dan tindak lanjut proses rekrutmen.',18);
-    const gap=3, w=(CONTENT_W-gap*2)/3, top=ctx.y;
-    const cells=[
-      ['Tahap Aktif',a.current_stage||'—'],
-      ['Perlu Diperhatikan',currentAttention(m)],
-      ['Langkah Berikutnya',nextAction(m)]
-    ];
-    const lineCounts=cells.map(([,value])=>wrap(ctx,value,w-7,7.1,'normal').length);
-    const h=Math.max(15,...lineCounts.map(n=>7+n*3.35));
-    ensure(ctx,h+13);
-    cells.forEach(([label,value],i)=>{
-      const x=PAGE.left+i*(w+gap);
-      ctx.doc.setFillColor(...SOFT);ctx.doc.setDrawColor(...LINE);ctx.doc.roundedRect(x,top,w,h,1.8,1.8,'FD');
-      microLabel(ctx,label,x+3.2,top+2.5);
-      setFont(ctx,7.1,i===0?'bold':'normal',i===0?NAVY:SLATE);
-      ctx.doc.text(ctx.doc.splitTextToSize(value,w-6.4),x+3.2,top+6.4,{baseline:'top'});
-    });
-    ctx.y+=h+3;
+    sectionHeading(ctx,'Ringkasan Eksekutif','Status proses dan tindakan yang perlu dilakukan HR.',22);
+    const overall=humanResult(clean(m.overall?.label)||a.current_stage||'Dalam Proses');
+    const action=nextAction(m);
+    const attention=currentAttention(m);
+    const gap=3, leftW=55, rightW=CONTENT_W-leftW-gap, top=ctx.y;
+    const statusLines=wrap(ctx,a.current_stage||'—',leftW-7,8.1,'bold');
+    const actionLines=wrap(ctx,action,rightW-7,7.4,'normal');
+    const h=Math.max(17,8+statusLines.length*3.8,7+actionLines.length*3.55);
+    ensure(ctx,h+18);
+
+    ctx.doc.setFillColor(...SOFT);ctx.doc.setDrawColor(...LINE);ctx.doc.roundedRect(PAGE.left,top,leftW,h,1.8,1.8,'FD');
+    microLabel(ctx,'Status Saat Ini',PAGE.left+3.2,top+2.5);
+    setFont(ctx,8.1,'bold',NAVY);ctx.doc.text(statusLines,PAGE.left+3.2,top+6.2,{baseline:'top'});
+    setFont(ctx,6.7,'bold',statusTone(overall).text);
+    ctx.doc.text(ctx.doc.splitTextToSize(overall,leftW-7),PAGE.left+3.2,top+6.5+statusLines.length*3.8,{baseline:'top'});
+
+    const rx=PAGE.left+leftW+gap;
+    ctx.doc.setFillColor(255,255,255);ctx.doc.setDrawColor(...LINE);ctx.doc.roundedRect(rx,top,rightW,h,1.8,1.8,'FD');
+    microLabel(ctx,'Tindakan HR',rx+3.2,top+2.5);
+    setFont(ctx,7.4,'normal',SLATE);ctx.doc.text(actionLines,rx+3.2,top+6.2,{baseline:'top'});
+    ctx.y+=h+2.4;
+
+    const attentionLines=wrap(ctx,attention,CONTENT_W-10,6.9,'normal');
+    const noteH=Math.max(8,4.5+attentionLines.length*3.25);
+    ensure(ctx,noteH+12);
+    ctx.doc.setFillColor(255,251,235);ctx.doc.setDrawColor(253,230,138);
+    ctx.doc.roundedRect(PAGE.left,ctx.y,CONTENT_W,noteH,1.5,1.5,'FD');
+    microLabel(ctx,'Catatan Perhatian',PAGE.left+3.2,ctx.y+2,[146,64,14]);
+    setFont(ctx,6.9,'normal',SLATE);ctx.doc.text(attentionLines,PAGE.left+34,ctx.y+2,{baseline:'top'});
+    ctx.y+=noteH+2.5;
     recruitmentProgress(ctx);
   }
 
@@ -403,7 +417,21 @@
     if(/pengalaman|\btahun\b/.test(s))return'Pengalaman';
     if(/usia|umur/.test(s))return'Usia';
     if(/domisili|berdomisili|tinggal|lokasi/.test(s))return'Domisili';
+    if(/excel|google sheets|ketenagakerjaan|alat tes|psikotes|rekrutmen|software|sistem|teknis/.test(s))return'Kompetensi Teknis';
+    if(/teliti|kerahasiaan|komunikasi|mengelola data|kerja sama|disiplin|inisiatif/.test(s))return'Kompetensi Kerja';
     return'Kompetensi';
+  }
+
+  function screeningRequirement(text){
+    const raw=String(text||'').replace(/\s*;\s*/g,'; ').trim();
+    const parts=raw.split(';').map(x=>clean(x)).filter(Boolean);
+    return parts.length>1?`• ${parts.join('\n• ')}`:(clean(raw)||'—');
+  }
+
+  function screeningDetailResult(raw,actual){
+    const result=humanResult(raw);
+    if(!present(actual)&&/perlu klarifikasi|perlu review/i.test(result))return'Perlu Verifikasi';
+    return result;
   }
 
   function screening(ctx){
@@ -429,14 +457,14 @@
         {label:'Evidence Kandidat',key:'actual',width:45},
         {label:'Status',key:'result',width:32}
       ],details.map(x=>{
-        const requirement=clean(x.text||x.requirement_id)||'—';
+        const rawRequirement=clean(x.text||x.requirement_id)||'—';
         return{
-          aspect:screeningAspect(requirement),
-          requirement,
+          aspect:screeningAspect(rawRequirement),
+          requirement:screeningRequirement(rawRequirement),
           actual:present(x.actual)?clean(x.actual):'Belum dapat diverifikasi',
-          result:humanResult(x.result||x.rule)
+          result:screeningDetailResult(x.result||x.rule,x.actual)
         };
-      }),{fontSize:6.45,lineH:3.05,padY:1.5,boldFirst:true});
+      }),{fontSize:6.6,lineH:3.15,padY:1.6,boldFirst:true});
     }
   }
 
@@ -569,7 +597,7 @@
     for(let p=1;p<=total;p++){
       doc.setPage(p);
       doc.setDrawColor(...LINE);doc.line(PAGE.left,14.5,PAGE.w-PAGE.right,14.5);
-      setFont(ctx,6.1,'bold',SLATE);doc.text('LAPORAN KANDIDAT TERINTEGRASI',PAGE.left,8.5,{baseline:'top'});
+      setFont(ctx,6.1,'bold',SLATE);doc.text(p===1?'MEGROUP · RECRUITMENT':'LAPORAN KANDIDAT TERINTEGRASI',PAGE.left,8.5,{baseline:'top'});
       setFont(ctx,6,'normal',MUTED);doc.text(candidate,PAGE.w-PAGE.right,8.5,{align:'right',baseline:'top'});
       doc.setDrawColor(...LINE);doc.line(PAGE.left,286,PAGE.w-PAGE.right,286);
       setFont(ctx,5.8,'normal',MUTED);doc.text(`Internal HR · Rahasia · ${appId}`,PAGE.left,289,{baseline:'top'});
@@ -605,7 +633,7 @@
       toast('Laporan Kandidat PDF berhasil dibuat.','success');
       return doc;
     }catch(error){
-      console.error('[Laporan Kandidat PDF V1.3] download failed',error);
+      console.error('[Laporan Kandidat PDF V1.4] download failed',error);
       const message=error?.message==='JSPDF_NOT_AVAILABLE'?'Library jsPDF tidak tersedia pada halaman ini.':(error?.message||'PDF gagal dibuat.');
       toast('Laporan Kandidat PDF gagal dibuat: '+message,'danger');
       return null;
@@ -633,21 +661,21 @@
     const previewRoot=root.querySelector('#candidateDossierPreviewV1');
     const info=previewRoot?.previousElementSibling;
     if(info && /(Fase PDF|Fase Laporan|Fase Paket Dokumen|Fase Paket)/i.test(info.textContent||'')){
-      info.innerHTML='<b>Laporan PDF V1.3:</b> format Executive Recruitment Assessment Report dengan layout dinamis. Paket Dokumen tetap menggunakan PDF dan model canonical yang sama.';
+      info.innerHTML='<b>Laporan PDF V1.4:</b> final visual polish Executive Recruitment Assessment Report. Paket Dokumen tetap menggunakan PDF dan model canonical yang sama.';
     }
   }
 
   function installOpenHook(){
     const current=window.openCandidateDossierV1;
-    if(typeof current!=='function'||current.__candidateDossierPdfV13Wrapped)return;
+    if(typeof current!=='function'||current.__candidateDossierPdfV14Wrapped)return;
     const wrapped=async function(...args){
       const result=await current.apply(this,args);
       setTimeout(activatePdfButton,0);
       setTimeout(activatePdfButton,120);
       return result;
     };
-    wrapped.__candidateDossierPdfV13Wrapped=true;
-    wrapped.__candidateDossierPdfV13Original=current;
+    wrapped.__candidateDossierPdfV14Wrapped=true;
+    wrapped.__candidateDossierPdfV14Original=current;
     window.openCandidateDossierV1=wrapped;
   }
 
@@ -660,5 +688,5 @@
 
   installOpenHook();
   document.addEventListener('DOMContentLoaded',()=>setTimeout(installOpenHook,1800));
-  console.log('%cLaporan Kandidat PDF V1.3 active','color:#2563eb;font-weight:bold');
+  console.log('%cLaporan Kandidat PDF V1.4 active','color:#2563eb;font-weight:bold');
 })();
