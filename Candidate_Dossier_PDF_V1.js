@@ -15,7 +15,7 @@
   if(window.__ATS_CANDIDATE_DOSSIER_PDF_V1_ACTIVE) return;
   window.__ATS_CANDIDATE_DOSSIER_PDF_V1_ACTIVE=true;
 
-  const VERSION='1.1.0-pdf';
+  const VERSION='1.0.0-pdf';
   const PAGE={w:210,h:297,left:14,right:14,top:23,bottom:281};
   const CONTENT_W=PAGE.w-PAGE.left-PAGE.right;
   const TEST_LABELS={CIFT:'Tes Kognitif',PAPIKOSTIK:'PAPI Kostick',INTEGRITY:'Tes Integritas',MSDT:'MSDT',DISC:'DISC',OVERALL:'Kesimpulan'};
@@ -44,10 +44,10 @@
     const doc=new Ctor({orientation:'portrait',unit:'mm',format:'a4',compress:true,putOnlyUsedFonts:true});
     const ctx={doc,model,y:PAGE.top,pageNo:1};
     doc.setProperties({
-      title:`Laporan Kandidat Terintegrasi - ${model?.candidate?.candidate_name||'Candidate'}`,
-      subject:`Laporan Kandidat Terintegrasi ${model?.application?.application_id||''}`,
+      title:`Candidate Dossier - ${model?.candidate?.candidate_name||'Candidate'}`,
+      subject:`Recruitment Candidate Dossier ${model?.application?.application_id||''}`,
       author:'MEGROUP Recruitment Tracker',
-      creator:`Laporan Kandidat Terintegrasi PDF ${VERSION}`
+      creator:`Candidate Dossier PDF ${VERSION}`
     });
     return ctx;
   }
@@ -232,7 +232,7 @@
     const {model}=ctx,a=model.application,c=model.candidate,p=model.position,co=model.company;
     ensure(ctx,55);
     ctx.doc.setFillColor(2,6,23);ctx.doc.roundedRect(PAGE.left,ctx.y,CONTENT_W,38,3,3,'F');
-    setFont(ctx,7,'normal',[203,213,225]);ctx.doc.text('LAPORAN KANDIDAT TERINTEGRASI · INTERNAL RECRUITMENT',PAGE.left+6,ctx.y+6,{baseline:'top'});
+    setFont(ctx,7,'normal',[203,213,225]);ctx.doc.text('CANDIDATE DOSSIER · INTERNAL RECRUITMENT',PAGE.left+6,ctx.y+6,{baseline:'top'});
     setFont(ctx,19,'bold',[255,255,255]);
     const nameLines=ctx.doc.splitTextToSize(c.candidate_name||'—',120);
     ctx.doc.text(nameLines,PAGE.left+6,ctx.y+13,{baseline:'top'});
@@ -247,7 +247,7 @@
 
   function executive(ctx){
     const m=ctx.model,s=m.screening,psy=m.psych,hr=m.hrInterview,u=m.userInterview,o=m.offering;
-    sectionTitle(ctx,'B','Ringkasan Proses Rekrutmen','Status resmi tiap tahap; bukan rata-rata skor.');
+    sectionTitle(ctx,'B','Executive Recruitment Summary','Status resmi tiap tahap; bukan rata-rata skor.');
     const stageRows=[
       ['Screening',s.state==='available'?(s.data?.reviewDecision||s.data?.systemStatus||'—'):s.state==='error'?'Data tidak dapat dimuat':'Data tidak ditemukan'],
       ['Psikotes',psy.state==='available'?(psy.data?.status==='Selesai'?(psy.data?.workflowDecision||'Perlu Review HR'):(psy.data?.status||'—')):psy.state==='error'?'Data tidak dapat dimuat':'Data tidak ditemukan'],
@@ -256,13 +256,13 @@
       ['Offering',o.state==='available'?(o.data?.status||'—'):'Belum dibuat']
     ];
     table(ctx,[{label:'Tahap',key:'stage',width:45},{label:'Status / Keputusan',key:'value',width:137}],stageRows.map(r=>({stage:r[0],value:r[1]})),{fontSize:8});
-    noteBox(ctx,'Status / Rekomendasi Rekrutmen',m.overall?.label||'—',{fill:[255,251,235],border:[253,230,138],titleColor:[146,64,14]});
+    noteBox(ctx,'Overall Recruitment Recommendation',m.overall?.label||'—',{fill:[255,251,235],border:[253,230,138],titleColor:[146,64,14]});
     bulletList(ctx,m.synthesis?.lines||[],{emptyText:'Belum ada evidence chain yang tersedia.'});
   }
 
   function profile(ctx){
     const c=ctx.model.candidate;
-    sectionTitle(ctx,'C','Profil Kandidat');
+    sectionTitle(ctx,'C','Candidate Profile');
     kvGrid(ctx,[
       ['Pendidikan',c.education],['Jurusan',c.major],['Domisili',c.city],['Pengalaman',present(c.experience)?`${c.experience}${Number.isFinite(Number(c.experience))?' tahun':''}`:null],
       ['Posisi Terakhir',c.last_role],['Perusahaan Terakhir',c.last_company],['Expected Salary',present(c.expected_salary)?money(c.expected_salary):null],['Notice Period',c.notice_period],
@@ -270,39 +270,9 @@
     ],2);
   }
 
-  function cvExtraction(ctx){
-    const x=ctx.model.cvExtraction||{state:'module_unavailable'};
-    sectionTitle(ctx,'D','Informasi dari CV','Hasil Auto-Read bersifat read-only dan belum menggantikan data profil kandidat.');
-    const statusMap={
-      extracted:'Teks CV berhasil dibaca otomatis',text_unavailable:'Teks CV tidak dapat diekstrak',unsupported:'Format CV belum didukung',
-      error:'Ekstraksi CV gagal',not_available:'CV belum tersedia',module_unavailable:'Modul CV Auto-Read belum tersedia'
-    };
-    kvGrid(ctx,[['Status Auto-Read',statusMap[x.state]||'Status tidak diketahui'],['Nama File',x.fileName],['Format',x.fileType?String(x.fileType).toUpperCase():null],['Verifikasi HR',x.verified===true?'Terverifikasi':'Belum diverifikasi']],2);
-    if(x.state==='not_available'){noteBox(ctx,'CV Kandidat','CV kandidat belum tersedia.');return;}
-    if(x.state==='module_unavailable'){noteBox(ctx,'CV Auto-Read','Modul pembaca CV belum termuat pada halaman ini.');return;}
-    if(x.state==='unsupported'){
-      noteBox(ctx,'CV Auto-Read',x.reason==='DOC_LEGACY_NOT_SUPPORTED'?'Format .DOC lama belum dapat dibaca otomatis. Gunakan PDF/DOCX atau verifikasi CV secara manual.':'Format file CV ini belum didukung untuk Auto-Read.',{fill:[255,251,235],border:[253,230,138],titleColor:[146,64,14]});return;
-    }
-    if(x.state==='text_unavailable'){noteBox(ctx,'CV Auto-Read','CV tersedia, tetapi tidak ditemukan text layer yang cukup. Kemungkinan CV berupa scan/gambar; verifikasi manual atau OCR diperlukan.',{fill:[255,251,235],border:[253,230,138],titleColor:[146,64,14]});return;}
-    if(x.state==='error'){noteBox(ctx,'CV Auto-Read','CV tidak dapat dibaca otomatis saat laporan dibuat. File CV tetap dapat dibuka secara manual.',{fill:[254,242,242],border:[254,202,202],titleColor:[185,28,28]});return;}
-    noteBox(ctx,'Status Verifikasi','Informasi berikut diekstrak otomatis dari teks CV dan belum menggantikan data profil kandidat. Gunakan sebagai bahan verifikasi HR.',{fill:[240,253,250],border:[153,246,228],titleColor:[15,118,110]});
-    const sec=x.sections||{};
-    const groups=[
-      ['Profil / Ringkasan',sec.profile],['Pendidikan',sec.education],['Pengalaman Kerja',sec.experience],['Keahlian / Kompetensi',sec.skills],
-      ['Sertifikasi / Pelatihan',sec.certifications],['Bahasa',sec.languages],['Organisasi',sec.organizations],['Prestasi / Penghargaan',sec.achievements]
-    ].filter(([,items])=>arr(items).length);
-    if(groups.length){
-      groups.forEach(([label,items])=>{textBlock(ctx,label,{fontSize:9,style:'bold',color:[51,65,85],gapAfter:1});bulletList(ctx,arr(items).slice(0,12));});
-    }else if(arr(x.previewLines).length){
-      textBlock(ctx,'Cuplikan Teks CV',{fontSize:9,style:'bold',color:[51,65,85],gapAfter:1});bulletList(ctx,arr(x.previewLines).slice(0,12));
-    }else noteBox(ctx,'Hasil Ekstraksi','Teks CV berhasil diekstrak, tetapi section yang dikenali belum tersedia.');
-    const contact=[...(x.contacts?.emails||[]),...(x.contacts?.linkedin||[])];
-    if(contact.length){textBlock(ctx,'Kontak yang Terdeteksi di CV',{fontSize:9,style:'bold',gapAfter:1});bulletList(ctx,contact.slice(0,6));}
-  }
-
   function screening(ctx){
     const block=ctx.model.screening;
-    sectionTitle(ctx,'E','Screening','System result dipisahkan dari keputusan/review HR.');
+    sectionTitle(ctx,'D','Screening','System result dipisahkan dari keputusan/review HR.');
     if(block.state==='error'){noteBox(ctx,'Data tidak dapat dimuat',block.error?.message||'Terjadi error saat membaca Screening.',{fill:[255,247,237],border:[253,186,116],titleColor:[154,52,18]});return;}
     if(block.state!=='available'){noteBox(ctx,'Data Screening','Tidak ditemukan hasil Screening tersimpan untuk application ini.');return;}
     const s=block.data;
@@ -317,7 +287,7 @@
 
   function psych(ctx){
     const block=ctx.model.psych;
-    sectionTitle(ctx,'F','Psikotes','Interpretasi hanya menggunakan hasil yang tersimpan dari SiPsiko.');
+    sectionTitle(ctx,'E','Psychotest','Interpretasi hanya menggunakan hasil yang tersimpan dari SiPsiko.');
     if(block.state==='error'){noteBox(ctx,'Data tidak dapat dimuat',block.error?.message||'Terjadi error saat membaca Psikotes.',{fill:[255,247,237],border:[253,186,116],titleColor:[154,52,18]});return;}
     if(block.state!=='available'){noteBox(ctx,'Data Psikotes','Tidak ditemukan sesi Psikotes tersimpan untuk application ini.');return;}
     const p=block.data;
@@ -357,18 +327,18 @@
 
   function conclusion(ctx){
     const m=ctx.model;
-    sectionTitle(ctx,'I','Kesimpulan Assessment','Sintesis deterministik dari evidence chain yang tersedia.');
+    sectionTitle(ctx,'H','Integrated Assessment Conclusion','Sintesis deterministik dari evidence chain yang tersedia.');
     noteBox(ctx,'Keputusan / Posisi Workflow Resmi',m.overall?.label||'—',{fill:[255,251,235],border:[253,230,138],titleColor:[146,64,14]});
     setFont(ctx,9,'bold',[15,23,42]);textBlock(ctx,'Evidence Chain',{fontSize:9,style:'bold',gapAfter:1});
     bulletList(ctx,m.synthesis?.lines||[],{emptyText:'Belum ada evidence chain yang tersedia.'});
     if(m.historyNotes?.length){setFont(ctx,9,'bold',[51,65,85]);textBlock(ctx,'Kelengkapan Histori',{fontSize:9,style:'bold',gapAfter:1});bulletList(ctx,m.historyNotes);}
     if(m.synthesis?.concerns?.length){setFont(ctx,9,'bold',[51,65,85]);textBlock(ctx,'Concern / Catatan Tersimpan',{fontSize:9,style:'bold',gapAfter:1});bulletList(ctx,m.synthesis.concerns);}
-    textBlock(ctx,'Laporan tidak menghitung rata-rata Interview HR + User sebagai keputusan dan tidak menambahkan fakta assessment di luar data tersimpan.',{fontSize:7.4,color:[100,116,139],gapAfter:3});
+    textBlock(ctx,'Dossier tidak menghitung rata-rata Interview HR + User sebagai keputusan dan tidak menambahkan fakta assessment di luar data tersimpan.',{fontSize:7.4,color:[100,116,139],gapAfter:3});
   }
 
   function offering(ctx){
     const block=ctx.model.offering;
-    sectionTitle(ctx,'J','Offering');
+    sectionTitle(ctx,'I','Offering');
     if(block.state!=='available'){noteBox(ctx,'Offering','Offering belum dibuat untuk application ini.');return;}
     const o=block.data;
     kvGrid(ctx,[['Status',o.status],['Gaji',money(o.salary)],['Tunjangan',money(o.allowance)],['Benefit',o.benefit],['Tanggal Offer',fmtDateOnly(o.offerDate)],['Deadline',fmtDateOnly(o.deadline)],['Expected Join',fmtDateOnly(o.expectedJoinDate)]],2);
@@ -377,19 +347,17 @@
 
   function timeline(ctx){
     const rows=arr(ctx.model.timeline);
-    sectionTitle(ctx,'K','Riwayat Rekrutmen','Hanya event yang benar-benar tersimpan; stage yang tidak ada tidak diinferensikan.');
+    sectionTitle(ctx,'J','Recruitment Timeline','Hanya event yang benar-benar tersimpan; stage yang tidak ada tidak diinferensikan.');
     if(!rows.length){noteBox(ctx,'Timeline','Belum ada event Recruitment History tersimpan.');return;}
     table(ctx,[{label:'Tanggal',key:'date',width:38},{label:'Event',key:'event',width:45},{label:'Aktor',key:'actor',width:38},{label:'Catatan',key:'notes',width:61}],rows.map(x=>({date:fmtDate(x.date),event:x.event||'Aktivitas',actor:x.actor||'—',notes:x.notes||'—'})),{fontSize:6.9});
   }
 
   function attachments(ctx){
-    const m=ctx.model;
-    sectionTitle(ctx,'L','Dokumen Pendukung','Laporan tetap dapat dibuat meskipun CV atau dokumen pendukung gagal di-fetch.');
-    const cvName=m.attachments?.cvFileName||m.cvExtraction?.fileName||(m.attachments?.cvPath?String(m.attachments.cvPath).split('/').pop().split('?')[0]:null);
-    kvGrid(ctx,[['CV Kandidat',m.attachments?.cvAvailable?'Tersedia':'Belum tersedia'],['Nama File CV',cvName||'—']],2);
-    if(m.attachments?.cvAvailable)noteBox(ctx,'CV Asli','CV asli tidak ditempel ke PDF laporan pada fase ini. File CV akan disertakan terpisah di Paket Dokumen Kandidat.');
+    const m=ctx.model,c=m.candidate;
+    sectionTitle(ctx,'K','CV & Attachments','Dossier tidak bergantung pada keberhasilan fetch CV.');
+    kvGrid(ctx,[['CV Kandidat',m.attachments?.cvAvailable?'Tersedia':'Belum tersedia'],['CV Storage Path',m.attachments?.cvPath]],2);
     const docs=arr(m.attachments?.psychDocuments);
-    if(docs.length){table(ctx,[{label:'Dokumen Psikotes',key:'name',width:182}],docs.map(d=>({name:d.fileName||'Dokumen Psikotes'})),{fontSize:7.5});}
+    if(docs.length){table(ctx,[{label:'Dokumen Psikotes',key:'name',width:80},{label:'Storage Path',key:'path',width:102}],docs.map(d=>({name:d.fileName||'Dokumen Psikotes',path:d.storagePath||'—'})),{fontSize:7});}
     else noteBox(ctx,'Dokumen Psikotes','Belum ada dokumen Psikotes tersimpan.');
   }
 
@@ -397,11 +365,10 @@
     cover(ctx);
     executive(ctx);
     profile(ctx);
-    cvExtraction(ctx);
     screening(ctx);
     psych(ctx);
-    interview(ctx,ctx.model.hrInterview,'G','Interview HR');
-    interview(ctx,ctx.model.userInterview,'H','Interview User');
+    interview(ctx,ctx.model.hrInterview,'F','Interview HR');
+    interview(ctx,ctx.model.userInterview,'G','Interview User');
     conclusion(ctx);
     offering(ctx);
     timeline(ctx);
@@ -415,7 +382,7 @@
     for(let p=1;p<=total;p++){
       doc.setPage(p);
       doc.setDrawColor(226,232,240);doc.line(PAGE.left,16,PAGE.w-PAGE.right,16);
-      setFont(ctx,6.8,'bold',[71,85,105]);doc.text('LAPORAN KANDIDAT TERINTEGRASI',PAGE.left,10,{baseline:'top'});
+      setFont(ctx,6.8,'bold',[71,85,105]);doc.text('CANDIDATE DOSSIER',PAGE.left,10,{baseline:'top'});
       setFont(ctx,6.8,'normal',[100,116,139]);doc.text(`${candidate} · ${appId}`,PAGE.w-PAGE.right,10,{align:'right',baseline:'top'});
       doc.setDrawColor(226,232,240);doc.line(PAGE.left,286,PAGE.w-PAGE.right,286);
       setFont(ctx,6.5,'normal',[100,116,139]);doc.text('Internal Recruitment · Confidential',PAGE.left,289,{baseline:'top'});
@@ -432,7 +399,7 @@
   }
 
   function filenameFor(model){
-    return `Laporan_Kandidat_${safeName(model?.candidate?.candidate_name)}_${safeName(model?.application?.application_id)}.pdf`;
+    return `Candidate_Dossier_${safeName(model?.candidate?.candidate_name)}_${safeName(model?.application?.application_id)}.pdf`;
   }
 
   async function resolveModel(appId){
@@ -448,12 +415,12 @@
       const model=await resolveModel(appId);
       const doc=buildCandidateDossierPdf(model);
       doc.save(filenameFor(model));
-      toast('Laporan Kandidat PDF berhasil dibuat.','success');
+      toast('Candidate Dossier PDF berhasil dibuat.','success');
       return doc;
     }catch(error){
       console.error('[Candidate Dossier PDF V1] download failed',error);
       const message=error?.message==='JSPDF_NOT_AVAILABLE'?'Library jsPDF tidak tersedia pada halaman ini.':(error?.message||'PDF gagal dibuat.');
-      toast('Laporan Kandidat PDF gagal dibuat: '+message,'danger');
+      toast('Candidate Dossier PDF gagal dibuat: '+message,'danger');
       return null;
     }
   }
@@ -468,19 +435,18 @@
     const root=document.getElementById('modalContent');
     if(!root)return;
     const buttons=[...root.querySelectorAll('button')];
-    const pdfButton=buttons.find(b=>/Download Laporan PDF/i.test(b.textContent||''));
+    const pdfButton=buttons.find(b=>/Download Dossier PDF/i.test(b.textContent||''));
     if(pdfButton){
       pdfButton.disabled=false;
       pdfButton.removeAttribute('disabled');
-      pdfButton.title='Download Laporan Kandidat Terintegrasi sebagai PDF A4';
+      pdfButton.title='Download Candidate Dossier sebagai PDF A4';
       pdfButton.className='px-3 py-2 bg-red-600 text-white rounded-lg text-xs font-semibold hover:bg-red-700';
-      pdfButton.innerHTML='<i class="fas fa-file-pdf mr-1"></i>Download Laporan PDF';
+      pdfButton.innerHTML='<i class="fas fa-file-pdf mr-1"></i>Download Dossier PDF';
       pdfButton.onclick=()=>downloadCandidateDossierPdf(window.CandidateDossierV1?.state?.lastAppId||null);
     }
-    const previewRoot=root.querySelector('#candidateDossierPreviewV1');
-    const info=previewRoot?.previousElementSibling;
-    if(info && /Fase Laporan:/i.test(info.textContent||'')){
-      info.innerHTML='<b>Fase PDF:</b> Laporan Kandidat Terintegrasi sudah tervalidasi. Download Laporan PDF A4 aktif; Paket Dokumen masih dinonaktifkan sampai PDF lolos regression.';
+    const info=[...root.querySelectorAll('div')].find(el=>/Fase Preview:/i.test(el.textContent||'')&&/tombol PDF/i.test(el.textContent||''));
+    if(info){
+      info.innerHTML='<b>Fase PDF:</b> Preview Candidate Dossier V1.0.3 sudah tervalidasi. Download Dossier PDF A4 aktif; Paket Dokumen masih dinonaktifkan sampai PDF lolos regression.';
     }
   }
 
@@ -507,5 +473,5 @@
 
   installOpenHook();
   document.addEventListener('DOMContentLoaded',()=>setTimeout(installOpenHook,1800));
-  console.log('%cLaporan Kandidat PDF V1 active','color:#dc2626;font-weight:bold');
+  console.log('%cCandidate Dossier PDF V1 active','color:#dc2626;font-weight:bold');
 })();
