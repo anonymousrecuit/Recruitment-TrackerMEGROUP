@@ -147,7 +147,7 @@
       brand:co?.brand||co?.company_name||'-',
       rekruter:recruiter,
       tanggal:expiry,
-      kode:code,
+      kode:`${code}\n- Link: ${url}`,
       lokasi:url
     };
     if(tpl?.body){try{const raw=typeof fillWaTemplate==='function'?fillWaTemplate(tpl.body,map):Object.entries(map).reduce((t,[k,v])=>t.replace(new RegExp('\\{'+k+'\\}','g'),v||'-'),tpl.body);return String(raw||'').replace(/\uFFFD+/g,'-').replace(/[📅🔑🔗]/gu,'-').replace(/^\s*-\s*Tanggal\s*:/gim,'- Batas pengerjaan:').replace(/^\s*-\s*Kode\s*\/\s*Link\s*:/gim,'- Kode Akses:');}catch(_){} }
