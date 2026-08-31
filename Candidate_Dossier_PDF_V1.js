@@ -1,5 +1,5 @@
 /* ========================================================================== 
-   LAPORAN KANDIDAT TERINTEGRASI PDF V1.2 - NATIVE A4
+   LAPORAN KANDIDAT TERINTEGRASI PDF V1.3 - EXECUTIVE A4
    Branch: feature/candidate-dossier-v1
 
    Design constraints:
@@ -7,6 +7,7 @@
    - Native jsPDF A4 portrait; no window.print, iframe print, or screenshots.
    - No database writes, no stage transitions, no MutationObserver.
    - Keeps the public API used by Candidate_Document_Package_V1.js.
+   - Renders only evidence already present in the canonical model.
    ========================================================================== */
 (function(){
   'use strict';
@@ -14,10 +15,10 @@
   if(window.__ATS_CANDIDATE_DOSSIER_PDF_V1_ACTIVE) return;
   window.__ATS_CANDIDATE_DOSSIER_PDF_V1_ACTIVE=true;
 
-  const VERSION='1.2.0-pdf';
-  const PAGE={w:210,h:297,left:15,right:15,top:22,bottom:281};
+  const VERSION='1.3.0-pdf';
+  const PAGE={w:210,h:297,left:15,right:15,top:20,bottom:282};
   const CONTENT_W=PAGE.w-PAGE.left-PAGE.right;
-  const NAVY=[15,23,42], SLATE=[71,85,105], MUTED=[100,116,139], LINE=[226,232,240], SOFT=[248,250,252];
+  const NAVY=[15,23,42], SLATE=[71,85,105], MUTED=[100,116,139], LINE=[226,232,240], SOFT=[248,250,252], BLUE=[37,99,235];
   const TEST_LABELS={CIFT:'Tes Kognitif',PAPIKOSTIK:'PAPI Kostick',INTEGRITY:'Tes Integritas',MSDT:'MSDT',DISC:'DISC',OVERALL:'Kesimpulan'};
 
   const arr=v=>Array.isArray(v)?v:[];
@@ -68,123 +69,117 @@
     return ctx.doc.splitTextToSize(String(text??'—'),Math.max(8,width));
   }
 
-  function textBlock(ctx,text,opts={}){
-    const x=opts.x??PAGE.left, width=opts.width??CONTENT_W;
-    const size=opts.size??8.6, style=opts.style??'normal', color=opts.color??SLATE;
-    const lineH=opts.lineH??4.25, gap=opts.gap??1.8;
-    const lines=wrap(ctx,text,width,size,style);
-    let i=0;
-    while(i<lines.length){
-      const fit=Math.max(1,Math.floor((PAGE.bottom-ctx.y)/lineH));
-      const chunk=lines.slice(i,i+fit);
-      ensure(ctx,chunk.length*lineH);
-      setFont(ctx,size,style,color);
-      ctx.doc.text(chunk,x,ctx.y,{baseline:'top'});
-      ctx.y+=chunk.length*lineH;
-      i+=chunk.length;
-      if(i<lines.length) addPage(ctx);
-    }
-    ctx.y+=gap;
-  }
-
-  function divider(ctx,gap=3){
-    ctx.y+=gap;
-    ctx.doc.setDrawColor(...LINE);
-    ctx.doc.line(PAGE.left,ctx.y,PAGE.w-PAGE.right,ctx.y);
-    ctx.y+=gap;
-  }
-
-  function sectionHeading(ctx,title,subtitle=''){
-    ensure(ctx,subtitle?16:12);
-    ctx.doc.setFillColor(37,99,235);
-    ctx.doc.roundedRect(PAGE.left,ctx.y,2.2,subtitle?12:8.5,1,1,'F');
-    setFont(ctx,11.5,'bold',NAVY);
-    ctx.doc.text(title,PAGE.left+6,ctx.y,{baseline:'top'});
+  function sectionHeading(ctx,title,subtitle='',minFollowing=6){
+    const subtitleLines=subtitle?wrap(ctx,subtitle,CONTENT_W-9,6.8,'normal'):[];
+    const headingH=subtitle?Math.max(10,6+subtitleLines.length*3.2):7.5;
+    ensure(ctx,headingH+minFollowing);
+    ctx.doc.setFillColor(...BLUE);
+    ctx.doc.roundedRect(PAGE.left,ctx.y,1.6,headingH-1,0.8,0.8,'F');
+    setFont(ctx,10.4,'bold',NAVY);
+    ctx.doc.text(title,PAGE.left+5,ctx.y,{baseline:'top'});
     if(subtitle){
-      setFont(ctx,7.2,'normal',MUTED);
-      const lines=ctx.doc.splitTextToSize(subtitle,CONTENT_W-10);
-      ctx.doc.text(lines,PAGE.left+6,ctx.y+6,{baseline:'top'});
-      ctx.y+=Math.max(14,7+lines.length*3.4);
-    }else ctx.y+=11;
+      setFont(ctx,6.8,'normal',MUTED);
+      ctx.doc.text(subtitleLines,PAGE.left+5,ctx.y+4.8,{baseline:'top'});
+    }
+    ctx.y+=headingH;
+  }
+
+  function microLabel(ctx,label,x,y,color=MUTED){
+    setFont(ctx,6.1,'bold',color);
+    ctx.doc.text(String(label||'').toUpperCase(),x,y,{baseline:'top'});
   }
 
   function statusTone(label){
     const s=String(label||'').toLowerCase();
+    if(/tolak|reject|gagal|tidak sesuai|berbeda/.test(s)) return {fill:[254,242,242],border:[254,202,202],text:[153,27,27]};
+    if(/error/.test(s)) return {fill:[254,242,242],border:[254,202,202],text:[153,27,27]};
     if(/lulus|lanjut|diterima|selesai|valid|sesuai/.test(s)) return {fill:[236,253,245],border:[167,243,208],text:[6,95,70]};
-    if(/tolak|reject|gagal|tidak sesuai|berbeda|error/.test(s)) return {fill:[254,242,242],border:[254,202,202],text:[153,27,27]};
     if(/review|menunggu|proses|klarifikasi|belum/.test(s)) return {fill:[255,251,235],border:[253,230,138],text:[146,64,14]};
     return {fill:[241,245,249],border:[203,213,225],text:[51,65,85]};
   }
 
-  function pill(ctx,label,x,y,maxW=60){
+  function pill(ctx,label,x,y,maxW=52){
     const value=clean(label)||'—';
     const tone=statusTone(value);
-    setFont(ctx,7.2,'bold',tone.text);
-    const lines=ctx.doc.splitTextToSize(value,Math.max(15,maxW-8));
-    const h=Math.max(7,4+lines.length*3.2);
+    setFont(ctx,6.8,'bold',tone.text);
+    const lines=ctx.doc.splitTextToSize(value,Math.max(14,maxW-7));
+    const h=Math.max(6.5,3.4+lines.length*3);
     ctx.doc.setFillColor(...tone.fill);ctx.doc.setDrawColor(...tone.border);
-    ctx.doc.roundedRect(x,y,maxW,h,3,3,'FD');
-    ctx.doc.text(lines,x+4,y+2.2,{baseline:'top'});
+    ctx.doc.roundedRect(x,y,maxW,h,2.5,2.5,'FD');
+    ctx.doc.text(lines,x+3.5,y+1.8,{baseline:'top'});
     return h;
   }
 
-  function labelValueGrid(ctx,items,cols=2){
-    const values=arr(items).filter(([k,v])=>present(v));
+  function compactGrid(ctx,items,cols=2,opts={}){
+    const values=arr(items).filter(([,v])=>present(v));
     if(!values.length)return;
-    const gap=8, colW=(CONTENT_W-gap*(cols-1))/cols;
+    const gap=opts.gap??7;
+    const colW=(CONTENT_W-gap*(cols-1))/cols;
+    const valueSize=opts.valueSize??8.1;
+    const rowGap=opts.rowGap??1.2;
     for(let i=0;i<values.length;i+=cols){
       const row=values.slice(i,i+cols);
-      const heights=row.map(([,value])=>Math.max(11,5+wrap(ctx,asText(value),colW,8.7,'bold').length*4));
+      const heights=row.map(([,value])=>Math.max(8.2,4.1+wrap(ctx,asText(value),colW,valueSize,'bold').length*3.5));
       const h=Math.max(...heights);
-      ensure(ctx,h+2);
+      ensure(ctx,h+rowGap);
       row.forEach(([label,value],j)=>{
         const x=PAGE.left+j*(colW+gap);
-        setFont(ctx,6.5,'normal',MUTED);
-        ctx.doc.text(String(label).toUpperCase(),x,ctx.y,{baseline:'top'});
-        setFont(ctx,8.7,'bold',NAVY);
-        ctx.doc.text(ctx.doc.splitTextToSize(asText(value),colW),x,ctx.y+4.2,{baseline:'top'});
+        microLabel(ctx,label,x,ctx.y);
+        setFont(ctx,valueSize,'bold',NAVY);
+        ctx.doc.text(ctx.doc.splitTextToSize(asText(value),colW),x,ctx.y+3.7,{baseline:'top'});
       });
-      ctx.y+=h+2;
+      ctx.y+=h+rowGap;
     }
   }
 
-  function callout(ctx,title,body,kind='neutral'){
+  function calloutMetrics(ctx,title,body,width=CONTENT_W,opts={}){
+    const titleSize=opts.titleSize??6.8, bodySize=opts.bodySize??7.7;
+    const titleLines=wrap(ctx,title,width-8,titleSize,'bold');
+    const bodyLines=wrap(ctx,body,width-8,bodySize,'normal');
+    return {titleLines,bodyLines,h:4+titleLines.length*3.1+bodyLines.length*3.55+3.3};
+  }
+
+  function callout(ctx,title,body,kind='neutral',opts={}){
     const palette={
       neutral:{fill:[248,250,252],border:[226,232,240],title:[51,65,85]},
       info:{fill:[239,246,255],border:[191,219,254],title:[29,78,216]},
       warn:{fill:[255,251,235],border:[253,230,138],title:[146,64,14]},
       good:{fill:[236,253,245],border:[167,243,208],title:[6,95,70]},
       danger:{fill:[254,242,242],border:[254,202,202],title:[153,27,27]}
-    }[kind]||null;
-    const p=palette||{fill:SOFT,border:LINE,title:SLATE};
-    const bodyLines=wrap(ctx,body,CONTENT_W-10,8.2,'normal');
-    const titleLines=wrap(ctx,title,CONTENT_W-10,7.5,'bold');
-    const h=6+titleLines.length*3.6+bodyLines.length*4+4;
-    ensure(ctx,h+2);
-    ctx.doc.setFillColor(...p.fill);ctx.doc.setDrawColor(...p.border);
-    ctx.doc.roundedRect(PAGE.left,ctx.y,CONTENT_W,h,2,2,'FD');
-    setFont(ctx,7.5,'bold',p.title);ctx.doc.text(titleLines,PAGE.left+4,ctx.y+3,{baseline:'top'});
-    setFont(ctx,8.2,'normal',SLATE);ctx.doc.text(bodyLines,PAGE.left+4,ctx.y+4+titleLines.length*3.6,{baseline:'top'});
-    ctx.y+=h+3;
+    }[kind]||{fill:SOFT,border:LINE,title:SLATE};
+    const width=opts.width??CONTENT_W, x=opts.x??PAGE.left;
+    const metrics=calloutMetrics(ctx,title,body,width,opts);
+    ensure(ctx,metrics.h+1.5);
+    ctx.doc.setFillColor(...palette.fill);ctx.doc.setDrawColor(...palette.border);
+    ctx.doc.roundedRect(x,ctx.y,width,metrics.h,2,2,'FD');
+    setFont(ctx,opts.titleSize??6.8,'bold',palette.title);ctx.doc.text(metrics.titleLines,x+4,ctx.y+2.6,{baseline:'top'});
+    setFont(ctx,opts.bodySize??7.7,'normal',SLATE);ctx.doc.text(metrics.bodyLines,x+4,ctx.y+3+metrics.titleLines.length*3.1,{baseline:'top'});
+    ctx.y+=metrics.h+(opts.gap??2.2);
+    return metrics.h;
   }
 
   function bullets(ctx,items,opts={}){
     const values=arr(items).filter(present);
     if(!values.length)return;
+    const size=opts.size??7.6, lineH=opts.lineH??3.7;
     values.forEach(item=>{
-      const lines=wrap(ctx,clean(item),CONTENT_W-8,8.3,'normal');
-      const h=Math.max(5,lines.length*4.1);
-      ensure(ctx,h+1);
-      setFont(ctx,8.3,'bold',[37,99,235]);ctx.doc.text('•',PAGE.left+1,ctx.y,{baseline:'top'});
-      setFont(ctx,8.3,'normal',SLATE);ctx.doc.text(lines,PAGE.left+5,ctx.y,{baseline:'top'});
-      ctx.y+=h+1;
+      const lines=wrap(ctx,clean(item),CONTENT_W-7,size,'normal');
+      const h=Math.max(4.2,lines.length*lineH);
+      ensure(ctx,h+0.8);
+      setFont(ctx,size,'bold',BLUE);ctx.doc.text('•',PAGE.left+0.5,ctx.y,{baseline:'top'});
+      setFont(ctx,size,'normal',SLATE);ctx.doc.text(lines,PAGE.left+4.2,ctx.y,{baseline:'top'});
+      ctx.y+=h+0.8;
     });
-    ctx.y+=opts.gap??1;
+    ctx.y+=opts.gap??0.5;
   }
 
   function humanResult(v){
     const s=String(v||'').trim().toUpperCase();
-    const map={PASS:'Sesuai',MATCH:'Sesuai',OK:'Sesuai',FAIL:'Tidak Sesuai',REJECT:'Tidak Sesuai',AMBIGUOUS:'Perlu Klarifikasi',REVIEW:'Perlu Review',WAJIB_REVIEW:'Perlu Review',MUST_REVIEW:'Perlu Review',AUTO_PASS:'Sesuai Otomatis',AUTO_REJECT:'Tidak Sesuai'};
+    const map={
+      PASS:'Sesuai',MATCH:'Sesuai',OK:'Sesuai',FAIL:'Tidak Sesuai',REJECT:'Tidak Sesuai',
+      AMBIGUOUS:'Perlu Klarifikasi',REVIEW:'Perlu Review HR',WAJIB_REVIEW:'Perlu Review HR',MUST_REVIEW:'Perlu Review HR',
+      AUTO_PASS:'Sesuai',AUTO_REJECT:'Tidak Sesuai'
+    };
     return map[s]||clean(v)||'—';
   }
 
@@ -193,172 +188,255 @@
     if(!list.length)return;
     const total=columns.reduce((s,c)=>s+c.width,0);
     const widths=columns.map(c=>c.width/total*CONTENT_W);
-    const pad=2.2, lineH=opts.lineH||3.7, fontSize=opts.fontSize||7.4, headerH=7.5;
+    const padX=opts.padX??1.8, padY=opts.padY??1.7, lineH=opts.lineH??3.25, fontSize=opts.fontSize??6.8, headerH=opts.headerH??6.3;
     function header(){
       ensure(ctx,headerH+4);
-      ctx.doc.setFillColor(241,245,249);ctx.doc.setDrawColor(...LINE);
-      ctx.doc.rect(PAGE.left,ctx.y,CONTENT_W,headerH,'FD');
+      ctx.doc.setFillColor(241,245,249);
+      ctx.doc.rect(PAGE.left,ctx.y,CONTENT_W,headerH,'F');
       let x=PAGE.left;
       columns.forEach((c,i)=>{
-        if(i>0)ctx.doc.line(x,ctx.y,x,ctx.y+headerH);
-        setFont(ctx,6.7,'bold',SLATE);ctx.doc.text(c.label,x+pad,ctx.y+2,{baseline:'top'});
+        setFont(ctx,6.2,'bold',SLATE);
+        ctx.doc.text(c.label,x+padX,ctx.y+1.8,{baseline:'top'});
         x+=widths[i];
       });
+      ctx.doc.setDrawColor(...LINE);ctx.doc.line(PAGE.left,ctx.y+headerH,PAGE.left+CONTENT_W,ctx.y+headerH);
       ctx.y+=headerH;
     }
     header();
     list.forEach(row=>{
-      const cells=columns.map((c,i)=>wrap(ctx,present(row[c.key])?row[c.key]:'—',widths[i]-pad*2,fontSize,'normal'));
-      const rowH=Math.max(1,...cells.map(x=>x.length))*lineH+pad*2;
+      const cells=columns.map((c,i)=>wrap(ctx,present(row[c.key])?row[c.key]:'—',widths[i]-padX*2,fontSize,'normal'));
+      const rowH=Math.max(1,...cells.map(x=>x.length))*lineH+padY*2;
       if(ctx.y+rowH>PAGE.bottom){addPage(ctx);header();}
-      ctx.doc.setDrawColor(...LINE);ctx.doc.rect(PAGE.left,ctx.y,CONTENT_W,rowH);
       let x=PAGE.left;
       cells.forEach((lines,i)=>{
-        if(i>0)ctx.doc.line(x,ctx.y,x,ctx.y+rowH);
-        setFont(ctx,fontSize,'normal',SLATE);ctx.doc.text(lines,x+pad,ctx.y+pad,{baseline:'top'});
+        setFont(ctx,fontSize,i===0&&opts.boldFirst?'bold':'normal',i===0&&opts.boldFirst?NAVY:SLATE);
+        ctx.doc.text(lines,x+padX,ctx.y+padY,{baseline:'top'});
         x+=widths[i];
       });
+      ctx.doc.setDrawColor(...LINE);ctx.doc.line(PAGE.left,ctx.y+rowH,PAGE.left+CONTENT_W,ctx.y+rowH);
       ctx.y+=rowH;
     });
-    ctx.y+=3;
+    ctx.y+=2;
   }
 
   function stageState(block,kind){
     if(kind==='screening'){
       if(block?.state==='error')return'Error Sistem';
       if(block?.state!=='available')return'Belum Ada';
-      return block.data?.reviewDecision||block.data?.systemStatus||'Tersedia';
+      return humanResult(block.data?.reviewDecision||block.data?.systemStatus||'Tersedia');
     }
     if(kind==='psych'){
       if(block?.state==='error')return'Error Sistem';
       if(block?.state!=='available')return'Belum Ada';
-      if(String(block.data?.status||'')==='Selesai')return block.data?.workflowDecision||block.data?.engineRecommendation||'Selesai';
-      return block.data?.status||'Tersedia';
+      if(String(block.data?.status||'')==='Selesai')return humanResult(block.data?.workflowDecision||block.data?.engineRecommendation||'Selesai');
+      return clean(block.data?.status)||'Tersedia';
     }
     if(kind==='interview'){
       if(block?.state!=='available')return'Belum Ada';
-      return block.data?.workflowDecision||block.data?.recommendation||'Tersedia';
+      return humanResult(block.data?.workflowDecision||block.data?.recommendation||'Tersedia');
     }
     if(kind==='offering'){
       if(block?.state!=='available')return'Belum Dibuat';
-      return block.data?.status||'Tersedia';
+      return clean(block.data?.status)||'Tersedia';
     }
     return'—';
   }
 
+  function stageIndex(stage){
+    const s=clean(stage).toLowerCase();
+    if(/diterima|joined|join/.test(s))return 6;
+    if(/offer|penawaran/.test(s))return 5;
+    if(/interview user|wawancara user/.test(s))return 4;
+    if(/interview hr|wawancara hr/.test(s))return 3;
+    if(/psiko/.test(s))return 2;
+    if(/screen/.test(s))return 1;
+    return 0;
+  }
+
+  function recruitmentProgress(ctx){
+    const labels=['Lamaran','Screening','Psikotes','Interview HR','Interview User','Offering'];
+    const current=Math.min(5,Math.max(0,stageIndex(ctx.model?.application?.current_stage)));
+    const start=PAGE.left+6, end=PAGE.w-PAGE.right-6, width=end-start, y=ctx.y+3.2;
+    ensure(ctx,12);
+    ctx.doc.setLineWidth(0.5);
+    ctx.doc.setDrawColor(...LINE);ctx.doc.line(start,y,end,y);
+    labels.forEach((label,i)=>{
+      const x=start+(width/(labels.length-1))*i;
+      const completed=i<current, active=i===current;
+      ctx.doc.setFillColor(...(completed||active?BLUE:[226,232,240]));
+      ctx.doc.circle(x,y,active?2.1:1.6,'F');
+      setFont(ctx,5.5,active?'bold':'normal',active?NAVY:MUTED);
+      const parts=ctx.doc.splitTextToSize(label,25);
+      ctx.doc.text(parts,x,y+3.2,{align:'center',baseline:'top'});
+    });
+    ctx.y+=11.5;
+  }
+
+  function cvSummary(model){
+    const x=model?.cvExtraction||{state:'module_unavailable'};
+    if(x.state==='not_available')return {title:'CV Belum Tersedia',body:'Belum ada CV kandidat yang dapat diverifikasi. Keputusan screening tidak boleh didasarkan pada asumsi data CV.',kind:'warn'};
+    if(x.state==='module_unavailable')return {title:'Review Manual Diperlukan',body:'Modul pembacaan CV tidak tersedia saat laporan dibuat. Verifikasi file asli secara manual; kondisi sistem ini tidak memengaruhi keputusan kandidat.',kind:'warn'};
+    if(x.state==='unsupported')return {title:'Format CV Perlu Review',body:x.reason==='DOC_LEGACY_NOT_SUPPORTED'?'Format .DOC lama belum dapat dibaca otomatis. Verifikasi file asli secara manual atau gunakan format PDF/DOCX bila diperlukan.':'Format CV belum didukung untuk pembacaan otomatis. Verifikasi file asli secara manual.',kind:'warn'};
+    if(x.state==='text_unavailable')return {title:'Review Manual Diperlukan',body:'CV tersedia, namun isi dokumen belum dapat dibaca otomatis karena file terindikasi berupa scan/gambar. HR perlu memverifikasi CV asli. OCR dapat digunakan bila diperlukan; kondisi ini tidak memengaruhi keputusan kandidat secara otomatis.',kind:'warn'};
+    if(x.state==='error')return {title:'Error Sistem CV',body:'CV tidak dapat dibaca otomatis saat laporan dibuat. File tetap dapat diverifikasi manual dan error sistem tidak boleh memengaruhi keputusan kandidat.',kind:'danger'};
+    return {title:x.verified===true?'CV Terverifikasi':'CV Berhasil Dibaca',body:x.verified===true?'Isi CV telah dibaca otomatis dan berstatus terverifikasi oleh HR.':'Isi CV berhasil dibaca otomatis, namun hasil pembacaan tetap merupakan data pendukung sampai diverifikasi HR.',kind:x.verified===true?'good':'info'};
+  }
+
+  function nextAction(model){
+    const stage=clean(model?.application?.current_stage).toLowerCase();
+    const cv=model?.cvExtraction||{};
+    if(/screen/.test(stage)){
+      if(['text_unavailable','unsupported','module_unavailable','error','not_available'].includes(cv.state))return'Review CV asli, verifikasi persyaratan Screening HR, lalu tetapkan keputusan screening.';
+      return'Verifikasi hasil Screening HR dan tetapkan keputusan untuk tahap berikutnya.';
+    }
+    if(/psiko/.test(stage))return'Tinjau hasil psikotes yang tersimpan dan tetapkan keputusan workflow sesuai hasil yang telah diverifikasi.';
+    if(/interview hr|wawancara hr/.test(stage))return'Laksanakan atau review Wawancara HR berdasarkan evidence yang tersimpan sebelum memindahkan tahap.';
+    if(/interview user|wawancara user/.test(stage))return'Laksanakan atau review Wawancara User, kemudian tetapkan keputusan workflow berdasarkan evidence yang tersimpan.';
+    if(/offer|penawaran/.test(stage))return'Tinjau status penawaran dan tindak lanjuti keputusan kandidat sesuai data offering yang tersimpan.';
+    if(/diterima|join/.test(stage))return'Pastikan administrasi join dan dokumen pendukung telah lengkap sesuai workflow.';
+    return'Tinjau data kandidat dan lanjutkan proses sesuai tahap workflow yang aktif.';
+  }
+
+  function currentAttention(model){
+    const cv=model?.cvExtraction||{};
+    const screening=model?.screening;
+    if(cv.state==='text_unavailable')return'Isi CV belum dapat dibaca otomatis; verifikasi manual diperlukan.';
+    if(cv.state==='error')return'Terdapat error sistem saat membaca CV; jangan gunakan error tersebut sebagai dasar keputusan kandidat.';
+    if(cv.state==='unsupported')return'Format CV memerlukan review manual.';
+    if(cv.state==='module_unavailable')return'Modul pembacaan CV tidak tersedia saat laporan dibuat; verifikasi file asli secara manual.';
+    if(cv.state==='not_available')return'CV belum tersedia untuk diverifikasi.';
+    if(screening?.state==='error')return'Data Screening tidak dapat dimuat saat laporan dibuat.';
+    if(screening?.state==='available'&&!present(screening.data?.reviewDecision))return'Keputusan HR pada Screening belum tersimpan.';
+    const concerns=arr(model?.synthesis?.concerns).filter(present);
+    return concerns[0]?clean(concerns[0]):'Tidak ada catatan khusus tambahan pada evidence yang tersedia.';
+  }
+
   function cover(ctx){
     const m=ctx.model,a=m.application||{},c=m.candidate||{},p=m.position||{},co=m.company||{};
-    const y=ctx.y;
-    ctx.doc.setFillColor(...NAVY);
-    ctx.doc.roundedRect(PAGE.left,y,CONTENT_W,36,3,3,'F');
-    setFont(ctx,6.6,'bold',[191,219,254]);ctx.doc.text('LAPORAN KANDIDAT TERINTEGRASI',PAGE.left+6,y+5,{baseline:'top'});
-    setFont(ctx,18,'bold',[255,255,255]);
-    const nameLines=ctx.doc.splitTextToSize(c.candidate_name||'—',117);
-    ctx.doc.text(nameLines,PAGE.left+6,y+12,{baseline:'top'});
-    setFont(ctx,8.4,'normal',[203,213,225]);
-    ctx.doc.text(`${p.position_name||'Posisi tidak tercatat'} · ${co.brand||co.company_name||'Perusahaan tidak tercatat'}`,PAGE.left+6,y+27,{baseline:'top'});
+    ensure(ctx,27);
+    setFont(ctx,6.2,'bold',BLUE);ctx.doc.text('EXECUTIVE RECRUITMENT ASSESSMENT REPORT',PAGE.left,ctx.y,{baseline:'top'});
+    ctx.y+=4.5;
     const status=clean(m.overall?.label)||clean(a.current_stage)||'Dalam Proses';
-    const tone=statusTone(status);
-    ctx.doc.setFillColor(...tone.fill);ctx.doc.roundedRect(PAGE.w-PAGE.right-55,y+10,49,11,4,4,'F');
-    setFont(ctx,7.2,'bold',tone.text);ctx.doc.text(ctx.doc.splitTextToSize(status,43),PAGE.w-PAGE.right-30.5,y+13,{align:'center',baseline:'top'});
-    ctx.y+=42;
-    labelValueGrid(ctx,[
-      ['Tahap Saat Ini',a.current_stage],['Tanggal Lamar',fmtDateOnly(a.application_date||a.applied_at||a.created_at)],
-      ['Status Lamaran',a.status],['Sumber Kandidat',c.source||a.source]
-    ],2);
-    setFont(ctx,6.4,'normal',MUTED);
-    ctx.doc.text(`Application ID: ${a.application_id||'—'}`,PAGE.left,ctx.y,{baseline:'top'});
-    ctx.y+=7;
+    const statusW=48;
+    const nameW=CONTENT_W-statusW-6;
+    setFont(ctx,16.5,'bold',NAVY);
+    const nameLines=ctx.doc.splitTextToSize(c.candidate_name||'—',nameW);
+    ctx.doc.text(nameLines,PAGE.left,ctx.y,{baseline:'top'});
+    pill(ctx,status,PAGE.w-PAGE.right-statusW,ctx.y-0.5,statusW);
+    ctx.y+=Math.max(8.5,nameLines.length*6.2);
+    setFont(ctx,8.2,'normal',SLATE);
+    ctx.doc.text(`${p.position_name||'Posisi tidak tercatat'} · ${co.brand||co.company_name||'Perusahaan tidak tercatat'}`,PAGE.left,ctx.y,{baseline:'top'});
+    ctx.y+=5;
+    const meta=[
+      `Tahap: ${a.current_stage||'—'}`,
+      `Lamaran: ${fmtDateOnly(a.application_date||a.applied_at||a.created_at)}`,
+      `Status: ${a.status||'—'}`
+    ];
+    if(present(c.source||a.source))meta.push(`Sumber: ${c.source||a.source}`);
+    setFont(ctx,6.5,'normal',MUTED);
+    ctx.doc.text(meta.join('   ·   '),PAGE.left,ctx.y,{baseline:'top'});
+    ctx.y+=5.2;
+    ctx.doc.setDrawColor(...LINE);ctx.doc.line(PAGE.left,ctx.y,PAGE.w-PAGE.right,ctx.y);
+    ctx.y+=4;
   }
 
   function executive(ctx){
-    const m=ctx.model;
-    sectionHeading(ctx,'Ringkasan Rekrutmen','Gambaran cepat status kandidat pada seluruh tahap seleksi.');
-    const stages=[
-      ['Screening',stageState(m.screening,'screening')],['Psikotes',stageState(m.psych,'psych')],['Wawancara HR',stageState(m.hrInterview,'interview')],
-      ['Wawancara User',stageState(m.userInterview,'interview')],['Penawaran',stageState(m.offering,'offering')]
+    const m=ctx.model,a=m.application||{};
+    sectionHeading(ctx,'Ringkasan Eksekutif','Ringkasan singkat untuk keputusan dan tindak lanjut proses rekrutmen.',18);
+    const gap=3, w=(CONTENT_W-gap*2)/3, top=ctx.y;
+    const cells=[
+      ['Tahap Aktif',a.current_stage||'—'],
+      ['Perlu Diperhatikan',currentAttention(m)],
+      ['Langkah Berikutnya',nextAction(m)]
     ];
-    const gap=2, w=(CONTENT_W-gap*4)/5, top=ctx.y;
-    let maxH=18;
-    stages.forEach(([label,status],i)=>{
+    const lineCounts=cells.map(([,value])=>wrap(ctx,value,w-7,7.1,'normal').length);
+    const h=Math.max(15,...lineCounts.map(n=>7+n*3.35));
+    ensure(ctx,h+13);
+    cells.forEach(([label,value],i)=>{
       const x=PAGE.left+i*(w+gap);
-      const tone=statusTone(status);
-      ctx.doc.setDrawColor(...LINE);ctx.doc.setFillColor(255,255,255);ctx.doc.roundedRect(x,top,w,18,2,2,'FD');
-      setFont(ctx,6.1,'bold',MUTED);ctx.doc.text(ctx.doc.splitTextToSize(label,w-4),x+2,top+2,{baseline:'top'});
-      setFont(ctx,6.6,'bold',tone.text);ctx.doc.text(ctx.doc.splitTextToSize(status,w-4),x+2,top+9,{baseline:'top'});
+      ctx.doc.setFillColor(...SOFT);ctx.doc.setDrawColor(...LINE);ctx.doc.roundedRect(x,top,w,h,1.8,1.8,'FD');
+      microLabel(ctx,label,x+3.2,top+2.5);
+      setFont(ctx,7.1,i===0?'bold':'normal',i===0?NAVY:SLATE);
+      ctx.doc.text(ctx.doc.splitTextToSize(value,w-6.4),x+3.2,top+6.4,{baseline:'top'});
     });
-    ctx.y+=maxH+4;
-    const status=clean(m.overall?.label)||'—';
-    callout(ctx,'POSISI / KEPUTUSAN WORKFLOW SAAT INI',status,/review|menunggu|proses|belum/i.test(status)?'warn':/tolak|gagal/i.test(status)?'danger':'good');
-    if(arr(m.synthesis?.lines).length){
-      setFont(ctx,7,'bold',MUTED);ctx.doc.text('DASAR RINGKAS',PAGE.left,ctx.y,{baseline:'top'});ctx.y+=5;
-      bullets(ctx,m.synthesis.lines.slice(0,5));
-    }
+    ctx.y+=h+3;
+    recruitmentProgress(ctx);
   }
 
   function profile(ctx){
     const c=ctx.model.candidate||{};
-    sectionHeading(ctx,'Profil Kandidat');
-    labelValueGrid(ctx,[
+    sectionHeading(ctx,'Profil Kandidat','Data profil yang tersimpan pada aplikasi kandidat.',16);
+    compactGrid(ctx,[
       ['Pendidikan',c.education],['Jurusan',c.major],['Domisili',c.city],
-      ['Pengalaman',present(c.experience)?`${c.experience}${Number.isFinite(Number(c.experience))?' tahun':''}`:null],
+      ['Pengalaman yang Dilaporkan',present(c.experience)?`${c.experience}${Number.isFinite(Number(c.experience))?' tahun':''}`:null],
       ['Posisi Terakhir',c.last_role],['Perusahaan Terakhir',c.last_company],
       ['Ekspektasi Gaji',present(c.expected_salary)?money(c.expected_salary):null],['Notice Period',c.notice_period],
       ['Bersedia Shift',c.willing_shift],['Alasan Melamar',c.apply_reason]
-    ],2);
+    ],2,{valueSize:7.8,rowGap:0.5});
+    ctx.y+=1;
   }
 
   function cvSection(ctx){
     const x=ctx.model.cvExtraction||{state:'module_unavailable'};
-    sectionHeading(ctx,'Validasi CV','Hasil pembacaan otomatis bersifat pendukung dan tidak menggantikan verifikasi HR.');
-    if(x.state==='not_available'){callout(ctx,'CV BELUM TERSEDIA','Belum ada CV kandidat yang dapat divalidasi.','warn');return;}
-    if(x.state==='module_unavailable'){callout(ctx,'AUTO-READ TIDAK TERSEDIA','Modul pembaca CV belum termuat pada halaman ini.','warn');return;}
-    if(x.state==='unsupported'){
-      callout(ctx,'FORMAT MEMERLUKAN REVIEW',x.reason==='DOC_LEGACY_NOT_SUPPORTED'?'Format .DOC lama belum didukung untuk pembacaan otomatis. Verifikasi file secara manual.':'Format CV belum didukung untuk pembacaan otomatis.','warn');return;
-    }
-    if(x.state==='text_unavailable'){
-      callout(ctx,'CV TERSEDIA · TEKS TIDAK TERBACA','File CV tersedia, tetapi text layer tidak cukup untuk diekstrak. Kemungkinan CV berupa scan/gambar. Lakukan review manual atau OCR; kondisi ini bukan alasan auto-reject.','warn');return;
-    }
-    if(x.state==='error'){
-      callout(ctx,'GAGAL MEMBACA CV','CV tidak dapat dibaca otomatis saat laporan dibuat. File tetap dapat diverifikasi manual dan error sistem tidak boleh memengaruhi keputusan kandidat.','danger');return;
-    }
+    const summary=cvSummary(ctx.model);
+    const metrics=calloutMetrics(ctx,summary.title,summary.body,CONTENT_W,{titleSize:6.7,bodySize:7.4});
+    sectionHeading(ctx,'Validasi CV','Pembacaan otomatis bersifat pendukung dan tidak menggantikan verifikasi HR.',metrics.h+2);
+    callout(ctx,summary.title,summary.body,summary.kind,{titleSize:6.7,bodySize:7.4,gap:1.8});
+
+    if(!['available','success','ok'].includes(String(x.state||'').toLowerCase()))return;
     const sec=x.sections||{};
-    labelValueGrid(ctx,[['Status Auto-Read','Berhasil'],['Verifikasi HR',x.verified===true?'Terverifikasi':'Belum diverifikasi']],2);
-    const groups=[['Pendidikan',sec.education],['Pengalaman Kerja',sec.experience],['Keahlian / Kompetensi',sec.skills],['Sertifikasi / Pelatihan',sec.certifications],['Bahasa',sec.languages]];
-    const active=groups.filter(([,items])=>arr(items).length);
-    if(active.length){
-      active.forEach(([label,items])=>{
-        setFont(ctx,7,'bold',MUTED);ctx.doc.text(label.toUpperCase(),PAGE.left,ctx.y,{baseline:'top'});ctx.y+=4.5;
-        bullets(ctx,arr(items).slice(0,8));
+    const groups=[['Pendidikan',sec.education],['Pengalaman Kerja',sec.experience],['Keahlian / Kompetensi',sec.skills],['Sertifikasi / Pelatihan',sec.certifications],['Bahasa',sec.languages]].filter(([,items])=>arr(items).length);
+    if(groups.length){
+      groups.forEach(([label,items])=>{
+        microLabel(ctx,label,PAGE.left,ctx.y);ctx.y+=3.5;
+        bullets(ctx,arr(items).slice(0,6),{size:7.2,lineH:3.45,gap:0});
       });
     }else if(arr(x.previewLines).length){
-      setFont(ctx,7,'bold',MUTED);ctx.doc.text('CUPLIKAN CV',PAGE.left,ctx.y,{baseline:'top'});ctx.y+=4.5;
-      bullets(ctx,arr(x.previewLines).slice(0,8));
-    }else callout(ctx,'HASIL AUTO-READ','Teks CV berhasil dibaca, tetapi belum ada section terstruktur yang dikenali.','info');
+      microLabel(ctx,'Cuplikan CV',PAGE.left,ctx.y);ctx.y+=3.5;
+      bullets(ctx,arr(x.previewLines).slice(0,6),{size:7.2,lineH:3.45,gap:0});
+    }
+  }
+
+  function screeningAspect(text){
+    const s=clean(text).toLowerCase();
+    if(/\b(sma|smk|d1|d2|d3|d4|s1|s2|s3)\b|pendidikan|sarjana|diploma/.test(s))return'Pendidikan';
+    if(/pengalaman|\btahun\b/.test(s))return'Pengalaman';
+    if(/usia|umur/.test(s))return'Usia';
+    if(/domisili|berdomisili|tinggal|lokasi/.test(s))return'Domisili';
+    return'Kompetensi';
   }
 
   function screening(ctx){
     const block=ctx.model.screening;
-    sectionHeading(ctx,'Screening','Hasil sistem dan keputusan HR ditampilkan terpisah.');
-    if(block?.state==='error'){callout(ctx,'DATA SCREENING TIDAK DAPAT DIMUAT',block.error?.message||'Terjadi error saat membaca data Screening.','danger');return;}
-    if(block?.state!=='available'){callout(ctx,'BELUM ADA DATA SCREENING','Tidak ditemukan hasil Screening tersimpan untuk application ini.','neutral');return;}
+    sectionHeading(ctx,'Screening','Hasil sistem, keputusan HR, dan evidence persyaratan ditampilkan terpisah.',18);
+    if(block?.state==='error'){
+      callout(ctx,'Data Screening Tidak Dapat Dimuat','Terjadi error saat membaca data Screening. Kondisi sistem tidak boleh digunakan sebagai dasar keputusan kandidat.','danger',{bodySize:7.4});return;
+    }
+    if(block?.state!=='available'){
+      callout(ctx,'Belum Ada Data Screening','Belum ditemukan hasil Screening tersimpan untuk kandidat ini.','neutral',{bodySize:7.4});return;
+    }
     const s=block.data||{};
-    labelValueGrid(ctx,[
-      ['Hasil Sistem',humanResult(s.systemStatus)],['Keputusan HR',s.reviewDecision],
+    compactGrid(ctx,[
+      ['Hasil Sistem',humanResult(s.systemStatus)],['Keputusan HR',s.reviewDecision?humanResult(s.reviewDecision):null],
       ['Match Preference',s.matchScore==null?null:`${Number(s.matchScore).toFixed(1)}%`],['Tanggal Screening',fmtDate(s.screenedAt)]
-    ],2);
-    if(s.reviewNotes) callout(ctx,'CATATAN REVIEW HR',`${s.reviewNotes}${s.reviewedBy||s.reviewedAt?`\n${s.reviewedBy||'Reviewer tidak tercatat'} · ${fmtDate(s.reviewedAt)}`:''}`,'info');
+    ],2,{valueSize:7.6,rowGap:0.4});
+    if(s.reviewNotes) callout(ctx,'Catatan Review HR',`${s.reviewNotes}${s.reviewedBy||s.reviewedAt?`\n${s.reviewedBy||'Reviewer tidak tercatat'} · ${fmtDate(s.reviewedAt)}`:''}`,'info',{bodySize:7.3,gap:1.5});
     const details=arr(s.details);
     if(details.length){
       table(ctx,[
-        {label:'Persyaratan',key:'requirement',width:92},
-        {label:'Aktual Kandidat',key:'actual',width:48},
-        {label:'Hasil',key:'result',width:40}
-      ],details.map(x=>({
-        requirement:clean(x.text||x.requirement_id)||'—',
-        actual:present(x.actual)?clean(x.actual):'Belum terbaca',
-        result:humanResult(x.result||x.rule)
-      })),{fontSize:7.1});
+        {label:'Aspek',key:'aspect',width:25},
+        {label:'Persyaratan Posisi',key:'requirement',width:78},
+        {label:'Evidence Kandidat',key:'actual',width:45},
+        {label:'Status',key:'result',width:32}
+      ],details.map(x=>{
+        const requirement=clean(x.text||x.requirement_id)||'—';
+        return{
+          aspect:screeningAspect(requirement),
+          requirement,
+          actual:present(x.actual)?clean(x.actual):'Belum dapat diverifikasi',
+          result:humanResult(x.result||x.rule)
+        };
+      }),{fontSize:6.45,lineH:3.05,padY:1.5,boldFirst:true});
     }
   }
 
@@ -366,88 +444,120 @@
     const block=ctx.model.psych;
     if(block?.state!=='available')return;
     const p=block.data||{};
-    sectionHeading(ctx,'Psikotes','Interpretasi hanya menggunakan hasil yang tersimpan dari SiPsiko.');
+    sectionHeading(ctx,'Psikotes','Hanya menggunakan hasil dan interpretasi yang benar-benar tersimpan dari SiPsiko.',18);
     const packageText=arr(p.package).map(x=>TEST_LABELS[x?.test_code]||x?.test_code).filter(Boolean).join(' · ');
-    labelValueGrid(ctx,[
-      ['Status',p.status],['Paket Tes',packageText],['Rekomendasi Engine',p.engineRecommendation],['Keputusan HR',String(p.status||'')==='Selesai'?(p.workflowDecision||'Perlu Review HR'):'Belum Ada']
-    ],2);
-    if(p.hrNotes&&String(p.status)==='Selesai')callout(ctx,'CATATAN HR PSIKOTES',p.hrNotes,'info');
+    compactGrid(ctx,[
+      ['Status',p.status],['Paket Tes',packageText],['Rekomendasi Engine',humanResult(p.engineRecommendation)],
+      ['Keputusan HR',String(p.status||'')==='Selesai'?(p.workflowDecision?humanResult(p.workflowDecision):'Belum Ada'):null]
+    ],2,{valueSize:7.6});
+    if(p.hrNotes&&String(p.status)==='Selesai')callout(ctx,'Catatan HR Psikotes',p.hrNotes,'info',{bodySize:7.3});
     const results=arr(p.results).filter(r=>r.code!=='OVERALL');
     if(results.length)table(ctx,[
-      {label:'Tes',key:'test',width:45},{label:'Hasil',key:'value',width:35},{label:'Interpretasi Tersimpan',key:'interpretation',width:100}
-    ],results.map(r=>({test:r.label||r.code||'Tes',value:r.value||'—',interpretation:r.interpretation||r.recommendation||'—'})),{fontSize:7});
+      {label:'Tes',key:'test',width:42},{label:'Hasil',key:'value',width:34},{label:'Interpretasi Tersimpan',key:'interpretation',width:104}
+    ],results.map(r=>({test:r.label||r.code||'Tes',value:r.value||'—',interpretation:r.interpretation||r.recommendation||'—'})),{fontSize:6.6});
   }
 
   function interview(ctx,block,label){
     if(block?.state!=='available')return;
     const d=block.data||{};
-    sectionHeading(ctx,label,'Rekomendasi interviewer dibedakan dari keputusan workflow resmi.');
-    labelValueGrid(ctx,[
+    sectionHeading(ctx,label,'Evidence interviewer dipisahkan dari keputusan workflow resmi.',18);
+    compactGrid(ctx,[
       ['Interviewer',d.interviewer||'Tidak tercatat'],['Tanggal',fmtDate(d.assessedAt)],['Skor',d.score?.label],
-      ['Rekomendasi Interviewer',d.recommendation],['Keputusan Workflow',d.workflowDecision]
-    ],2);
-    if(arr(d.storedStrengths).length){setFont(ctx,7,'bold',[6,95,70]);ctx.doc.text('KEKUATAN TERSIMPAN',PAGE.left,ctx.y,{baseline:'top'});ctx.y+=4.5;bullets(ctx,d.storedStrengths);}
-    if(arr(d.storedGaps).length){setFont(ctx,7,'bold',[146,64,14]);ctx.doc.text('AREA PERHATIAN TERSIMPAN',PAGE.left,ctx.y,{baseline:'top'});ctx.y+=4.5;bullets(ctx,d.storedGaps);}
-    if(d.cvVerification)callout(ctx,'VERIFIKASI CV / PROFIL',d.cvVerification,'neutral');
-    if(arr(d.redFlags).length)callout(ctx,`RED FLAGS TERCATAT (${d.redFlags.length})`,d.redFlags.map(x=>`• ${x}`).join('\n')+(d.redFlagNotes?`\n\nKlarifikasi: ${d.redFlagNotes}`:''),'danger');
+      ['Rekomendasi Interviewer',humanResult(d.recommendation)],['Keputusan Workflow',humanResult(d.workflowDecision)]
+    ],2,{valueSize:7.6});
+    if(arr(d.storedStrengths).length){microLabel(ctx,'Kekuatan Tersimpan',PAGE.left,ctx.y,[6,95,70]);ctx.y+=3.5;bullets(ctx,d.storedStrengths,{size:7.2,lineH:3.45,gap:0});}
+    if(arr(d.storedGaps).length){microLabel(ctx,'Area Perhatian Tersimpan',PAGE.left,ctx.y,[146,64,14]);ctx.y+=3.5;bullets(ctx,d.storedGaps,{size:7.2,lineH:3.45,gap:0});}
+    if(d.cvVerification)callout(ctx,'Verifikasi CV / Profil',d.cvVerification,'neutral',{bodySize:7.3});
+    if(arr(d.redFlags).length)callout(ctx,`Red Flags Tercatat (${d.redFlags.length})`,d.redFlags.map(x=>`• ${x}`).join('\n')+(d.redFlagNotes?`\n\nKlarifikasi: ${d.redFlagNotes}`:''),'danger',{bodySize:7.2});
     if(arr(d.evidence).length)table(ctx,[
-      {label:'Kompetensi',key:'comp',width:52},{label:'Skor',key:'score',width:22},{label:'Evidence',key:'evidence',width:106}
-    ],d.evidence.map(x=>({comp:x.competency_name||'—',score:present(x.score)?`${x.score}/4`:'BT',evidence:x.evidence||'—'})),{fontSize:7});
-    if(d.conclusion)callout(ctx,'KESIMPULAN INTERVIEWER',d.conclusion,'neutral');
-    if(d.workflowReviewedAt||d.workflowReviewNotes)callout(ctx,'REVIEW WORKFLOW',`${d.workflowReviewedBy||'Reviewer tidak tercatat'}${d.workflowReviewedAt?` · ${fmtDate(d.workflowReviewedAt)}`:''}${d.workflowReviewNotes?`\n${d.workflowReviewNotes}`:''}`,'info');
-  }
-
-  function conclusion(ctx){
-    const m=ctx.model;
-    sectionHeading(ctx,'Kesimpulan Assessment','Sintesis berbasis evidence yang tersedia; bukan rata-rata sederhana antar interviewer.');
-    const label=m.overall?.label||'—';
-    callout(ctx,'POSISI WORKFLOW RESMI',label,/review|menunggu|proses|belum/i.test(label)?'warn':/tolak|gagal/i.test(label)?'danger':'good');
-    if(arr(m.synthesis?.lines).length){setFont(ctx,7,'bold',MUTED);ctx.doc.text('DASAR KESIMPULAN',PAGE.left,ctx.y,{baseline:'top'});ctx.y+=4.5;bullets(ctx,m.synthesis.lines);}
-    if(arr(m.historyNotes).length){setFont(ctx,7,'bold',MUTED);ctx.doc.text('KELENGKAPAN HISTORI',PAGE.left,ctx.y,{baseline:'top'});ctx.y+=4.5;bullets(ctx,m.historyNotes);}
-    if(arr(m.synthesis?.concerns).length){setFont(ctx,7,'bold',[146,64,14]);ctx.doc.text('CATATAN / CONCERN',PAGE.left,ctx.y,{baseline:'top'});ctx.y+=4.5;bullets(ctx,m.synthesis.concerns);}
+      {label:'Kompetensi',key:'comp',width:50},{label:'Skor',key:'score',width:22},{label:'Evidence',key:'evidence',width:108}
+    ],d.evidence.map(x=>({comp:x.competency_name||'—',score:present(x.score)?`${x.score}/4`:'Belum Dinilai',evidence:x.evidence||'—'})),{fontSize:6.55});
+    if(d.conclusion)callout(ctx,'Kesimpulan Interviewer',d.conclusion,'neutral',{bodySize:7.3});
+    if(d.workflowReviewedAt||d.workflowReviewNotes)callout(ctx,'Review Workflow',`${d.workflowReviewedBy||'Reviewer tidak tercatat'}${d.workflowReviewedAt?` · ${fmtDate(d.workflowReviewedAt)}`:''}${d.workflowReviewNotes?`\n${d.workflowReviewNotes}`:''}`,'info',{bodySize:7.3});
   }
 
   function offering(ctx){
     const block=ctx.model.offering;
     if(block?.state!=='available')return;
     const o=block.data||{};
-    sectionHeading(ctx,'Penawaran Kerja');
-    labelValueGrid(ctx,[['Status',o.status],['Gaji',money(o.salary)],['Tunjangan',money(o.allowance)],['Benefit',o.benefit],['Tanggal Offer',fmtDateOnly(o.offerDate)],['Deadline',fmtDateOnly(o.deadline)],['Rencana Join',fmtDateOnly(o.expectedJoinDate)]],2);
+    sectionHeading(ctx,'Penawaran Kerja','Data penawaran yang tersimpan pada workflow kandidat.',14);
+    compactGrid(ctx,[['Status',o.status],['Gaji',money(o.salary)],['Tunjangan',money(o.allowance)],['Benefit',o.benefit],['Tanggal Offer',fmtDateOnly(o.offerDate)],['Deadline',fmtDateOnly(o.deadline)],['Rencana Join',fmtDateOnly(o.expectedJoinDate)]],2,{valueSize:7.6});
+  }
+
+  function hasSubstantiveAssessment(model){
+    const psych=model?.psych;
+    const hr=model?.hrInterview;
+    const user=model?.userInterview;
+    const psychReady=psych?.state==='available'&&(String(psych.data?.status||'')==='Selesai'||arr(psych.data?.results).length>0);
+    return psychReady||hr?.state==='available'||user?.state==='available';
+  }
+
+  function conclusion(ctx){
+    const m=ctx.model;
+    if(!hasSubstantiveAssessment(m)){
+      if(arr(m.historyNotes).length){
+        sectionHeading(ctx,'Catatan Kelengkapan Data','Catatan ini berasal dari histori/data yang tersedia pada sistem.',8);
+        bullets(ctx,m.historyNotes,{size:7.1,lineH:3.4,gap:0});
+      }
+      return;
+    }
+    sectionHeading(ctx,'Kesimpulan Assessment & Rekomendasi','Sintesis hanya berdasarkan evidence yang tersedia dan keputusan workflow yang tersimpan.',16);
+    const label=humanResult(m.overall?.label||'—');
+    callout(ctx,'Posisi Workflow Resmi',label,/review|menunggu|proses|belum/i.test(label)?'warn':/tolak|gagal/i.test(label)?'danger':'good',{bodySize:7.6,gap:1.5});
+    if(arr(m.synthesis?.lines).length){microLabel(ctx,'Dasar Kesimpulan',PAGE.left,ctx.y);ctx.y+=3.5;bullets(ctx,m.synthesis.lines,{size:7.2,lineH:3.45,gap:0});}
+    if(arr(m.synthesis?.concerns).length){microLabel(ctx,'Catatan / Concern',PAGE.left,ctx.y,[146,64,14]);ctx.y+=3.5;bullets(ctx,m.synthesis.concerns,{size:7.2,lineH:3.45,gap:0});}
+    if(arr(m.historyNotes).length){microLabel(ctx,'Kelengkapan Histori',PAGE.left,ctx.y);ctx.y+=3.5;bullets(ctx,m.historyNotes,{size:7.1,lineH:3.4,gap:0});}
   }
 
   function timeline(ctx){
     const rows=arr(ctx.model.timeline);
     if(!rows.length)return;
-    sectionHeading(ctx,'Riwayat Rekrutmen','Hanya event yang benar-benar tersimpan di recruitment history.');
+    sectionHeading(ctx,'Riwayat Rekrutmen','Hanya event yang benar-benar tersimpan di recruitment history.',rows.length<=3?7:14);
+    if(rows.length<=3){
+      rows.forEach(x=>{
+        const date=fmtDate(x.date), event=clean(x.event||'Aktivitas');
+        const meta=[x.actor?`Aktor: ${x.actor}`:null,x.notes?clean(x.notes):null].filter(Boolean).join(' · ');
+        const eventLines=wrap(ctx,event,CONTENT_W-43,7.3,'bold');
+        const metaLines=meta?wrap(ctx,meta,CONTENT_W-43,6.5,'normal'):[];
+        const h=Math.max(6.2,eventLines.length*3.5+(metaLines.length?metaLines.length*3+1:0));
+        ensure(ctx,h+1);
+        setFont(ctx,6.5,'normal',MUTED);ctx.doc.text(date,PAGE.left,ctx.y,{baseline:'top'});
+        setFont(ctx,7.3,'bold',NAVY);ctx.doc.text(eventLines,PAGE.left+43,ctx.y,{baseline:'top'});
+        if(metaLines.length){setFont(ctx,6.5,'normal',SLATE);ctx.doc.text(metaLines,PAGE.left+43,ctx.y+eventLines.length*3.5+0.6,{baseline:'top'});}
+        ctx.y+=h;
+        ctx.doc.setDrawColor(...LINE);ctx.doc.line(PAGE.left,ctx.y,PAGE.left+CONTENT_W,ctx.y);ctx.y+=1.2;
+      });
+      ctx.y+=0.5;
+      return;
+    }
     table(ctx,[
       {label:'Tanggal',key:'date',width:38},{label:'Event',key:'event',width:48},{label:'Aktor',key:'actor',width:38},{label:'Catatan',key:'notes',width:56}
-    ],rows.map(x=>({date:fmtDate(x.date),event:x.event||'Aktivitas',actor:x.actor||'—',notes:x.notes||'—'})),{fontSize:6.8});
+    ],rows.map(x=>({date:fmtDate(x.date),event:x.event||'Aktivitas',actor:x.actor||'—',notes:x.notes||'—'})),{fontSize:6.4});
   }
 
   function attachments(ctx){
     const m=ctx.model, docs=arr(m.attachments?.psychDocuments);
-    sectionHeading(ctx,'Dokumen Pendukung');
-    const parts=[];
-    if(m.attachments?.cvAvailable)parts.push('CV kandidat tersedia dan disertakan sebagai file terpisah pada Paket Dokumen.');
-    else parts.push('CV kandidat belum tersedia.');
-    if(docs.length)parts.push(`${docs.length} dokumen Psikotes tersimpan tersedia pada Paket Dokumen.`);
-    else parts.push('Belum ada dokumen Psikotes tersimpan.');
-    callout(ctx,'KETERSEDIAAN DOKUMEN',parts.join(' '),'neutral');
+    ensure(ctx,11);
+    microLabel(ctx,'Dokumen Pendukung',PAGE.left,ctx.y);
+    ctx.y+=3.7;
+    const cvText=m.attachments?.cvAvailable?'CV: tersedia, file asli disertakan terpisah':'CV: belum tersedia';
+    const psychText=docs.length?`Psikotes: ${docs.length} dokumen tersimpan`:'Psikotes: belum tersedia';
+    const lines=wrap(ctx,`${cvText}   ·   ${psychText}`,CONTENT_W,7.1,'normal');
+    setFont(ctx,7.1,'normal',SLATE);ctx.doc.text(lines,PAGE.left,ctx.y,{baseline:'top'});
+    ctx.y+=Math.max(4.2,lines.length*3.45)+1;
   }
 
   function renderAll(ctx){
     cover(ctx);
     executive(ctx);
-    divider(ctx,2);
     profile(ctx);
     cvSection(ctx);
-    divider(ctx,2);
     screening(ctx);
     psych(ctx);
     interview(ctx,ctx.model.hrInterview,'Wawancara HR');
     interview(ctx,ctx.model.userInterview,'Wawancara User');
-    conclusion(ctx);
     offering(ctx);
+    conclusion(ctx);
     timeline(ctx);
     attachments(ctx);
   }
@@ -458,11 +568,11 @@
     const appId=ctx.model?.application?.application_id||'—';
     for(let p=1;p<=total;p++){
       doc.setPage(p);
-      doc.setDrawColor(...LINE);doc.line(PAGE.left,15,PAGE.w-PAGE.right,15);
-      setFont(ctx,6.5,'bold',SLATE);doc.text('LAPORAN KANDIDAT TERINTEGRASI',PAGE.left,9,{baseline:'top'});
-      setFont(ctx,6.3,'normal',MUTED);doc.text(`${candidate} · ${appId}`,PAGE.w-PAGE.right,9,{align:'right',baseline:'top'});
+      doc.setDrawColor(...LINE);doc.line(PAGE.left,14.5,PAGE.w-PAGE.right,14.5);
+      setFont(ctx,6.1,'bold',SLATE);doc.text('LAPORAN KANDIDAT TERINTEGRASI',PAGE.left,8.5,{baseline:'top'});
+      setFont(ctx,6,'normal',MUTED);doc.text(candidate,PAGE.w-PAGE.right,8.5,{align:'right',baseline:'top'});
       doc.setDrawColor(...LINE);doc.line(PAGE.left,286,PAGE.w-PAGE.right,286);
-      setFont(ctx,6.2,'normal',MUTED);doc.text('Internal HR · Rahasia',PAGE.left,289,{baseline:'top'});
+      setFont(ctx,5.8,'normal',MUTED);doc.text(`Internal HR · Rahasia · ${appId}`,PAGE.left,289,{baseline:'top'});
       doc.text(`Halaman ${p} dari ${total}`,PAGE.w-PAGE.right,289,{align:'right',baseline:'top'});
     }
   }
@@ -495,7 +605,7 @@
       toast('Laporan Kandidat PDF berhasil dibuat.','success');
       return doc;
     }catch(error){
-      console.error('[Laporan Kandidat PDF V1.2] download failed',error);
+      console.error('[Laporan Kandidat PDF V1.3] download failed',error);
       const message=error?.message==='JSPDF_NOT_AVAILABLE'?'Library jsPDF tidak tersedia pada halaman ini.':(error?.message||'PDF gagal dibuat.');
       toast('Laporan Kandidat PDF gagal dibuat: '+message,'danger');
       return null;
@@ -523,21 +633,21 @@
     const previewRoot=root.querySelector('#candidateDossierPreviewV1');
     const info=previewRoot?.previousElementSibling;
     if(info && /(Fase PDF|Fase Laporan|Fase Paket Dokumen|Fase Paket)/i.test(info.textContent||'')){
-      info.innerHTML='<b>Laporan PDF V1.2:</b> layout laporan HR diperbarui menjadi lebih ringkas dan profesional. Paket Dokumen tetap menggunakan PDF yang sama.';
+      info.innerHTML='<b>Laporan PDF V1.3:</b> format Executive Recruitment Assessment Report dengan layout dinamis. Paket Dokumen tetap menggunakan PDF dan model canonical yang sama.';
     }
   }
 
   function installOpenHook(){
     const current=window.openCandidateDossierV1;
-    if(typeof current!=='function'||current.__candidateDossierPdfV12Wrapped)return;
+    if(typeof current!=='function'||current.__candidateDossierPdfV13Wrapped)return;
     const wrapped=async function(...args){
       const result=await current.apply(this,args);
       setTimeout(activatePdfButton,0);
       setTimeout(activatePdfButton,120);
       return result;
     };
-    wrapped.__candidateDossierPdfV12Wrapped=true;
-    wrapped.__candidateDossierPdfV12Original=current;
+    wrapped.__candidateDossierPdfV13Wrapped=true;
+    wrapped.__candidateDossierPdfV13Original=current;
     window.openCandidateDossierV1=wrapped;
   }
 
@@ -550,5 +660,5 @@
 
   installOpenHook();
   document.addEventListener('DOMContentLoaded',()=>setTimeout(installOpenHook,1800));
-  console.log('%cLaporan Kandidat PDF V1.2 active','color:#2563eb;font-weight:bold');
+  console.log('%cLaporan Kandidat PDF V1.3 active','color:#2563eb;font-weight:bold');
 })();
