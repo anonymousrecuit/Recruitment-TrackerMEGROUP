@@ -161,7 +161,147 @@
   async function psychSummary(appId){const {data,error}=await sb.rpc('get_psychotest_summary_for_application',{p_application_id:appId});if(error)throw error;return data;}
   function resultValue(r){const j=r?.result_json||{};if(r?.test_code==='CIFT')return r.score==null?'—':`${Number(r.score).toFixed(0)}/30`;if(r?.test_code==='PAPIKOSTIK')return r.score==null?'—':`Avg ${Number(r.score).toFixed(2)}`;if(r?.test_code==='MSDT')return j.type||'—';if(r?.test_code==='DISC'){const sc=j.scores||{};const d=Object.entries(sc).sort((a,b)=>Number(b[1])-Number(a[1]))[0];return d?`Dominan ${d[0]} (${d[1]})`:'—';}if(r?.test_code==='INTEGRITY')return`A ${j.total_a??'—'} · B ${j.total_b??'—'} · C ${j.total_c??'—'}`;return r?.recommendation||'—';}
   async function viewPsychResult(appId){try{const s=await psychSummary(appId);if(!s?.exists)return showToast('Belum ada hasil','warning');const sess=s.session||{};openModal(`<div class="p-6"><div class="flex justify-between gap-3"><div><h3 class="font-bold text-lg">Hasil Psikotes</h3><p class="text-xs text-slate-500">Attempt ${esc(sess.attempt_no||1)} · ${esc(fmt(sess.completed_at))}</p></div><span class="px-2 py-1 rounded-full text-xs ${decisionClass(sess.workflow_decision)}">${esc(sess.workflow_decision)}</span></div><div class="space-y-2 mt-4">${(s.results||[]).filter(r=>r.test_code!=='OVERALL').map(r=>`<div class="border rounded-lg p-3"><div class="flex justify-between gap-3"><b class="text-sm">${esc(testLabel(r.test_code))}</b><span class="text-sm font-semibold">${esc(resultValue(r))}</span></div>${r.interpretation?`<p class="text-xs text-slate-500 mt-2">${esc(r.interpretation)}</p>`:''}</div>`).join('')}</div><div class="bg-slate-50 rounded-lg p-3 mt-3 text-xs"><b>Rekomendasi Engine:</b> ${esc(sess.engine_recommendation||'—')}</div><div class="text-right mt-4"><button onclick="closeModal()" class="px-3 py-2 border rounded-lg">Tutup</button></div></div>`);}catch(e){showToast('Gagal membaca hasil: '+e.message,'danger');}}
-  async function openPsychReview(appId){let s;try{s=await psychSummary(appId);}catch(e){return showToast('Gagal membaca hasil: '+e.message,'danger');}if(!s?.exists||s.session?.status!=='Selesai')return showToast('Psikotes belum selesai','warning');openModal(`<div class="p-6"><h3 class="font-bold text-lg">Review Hasil Psikotes</h3><p class="text-sm text-slate-500 mt-1">Rekomendasi engine: <b>${esc(s.session.engine_recommendation||'—')}</b>. Keputusan recruitment tetap HR.</p><textarea id="v2PsychNotes" rows="4" class="w-full border rounded-lg p-2 mt-4 text-sm" placeholder="Catatan pertimbangan HR">${esc(s.session.hr_notes||'')}</textarea><div class="grid grid-cols-3 gap-2 mt-4"><button onclick="savePsychReviewV2('${appId}','Lanjut')" class="px-2 py-2 bg-emerald-600 text-white rounded-lg text-sm">Lanjut</button><button onclick="savePsychReviewV2('${appId}','Perlu Review HR')" class="px-2 py-2 bg-amber-500 text-white rounded-lg text-sm">Review</button><button onclick="savePsychReviewV2('${appId}','Tidak Lanjut')" class="px-2 py-2 bg-red-600 text-white rounded-lg text-sm">Tidak Lanjut</button></div><div class="text-right mt-3"><button onclick="closeModal()" class="px-3 py-2 border rounded-lg text-sm">Batal</button></div></div>`);}
+  async function openPsychReview(appId){
+  let s;
+
+  try{
+    s=await psychSummary(appId);
+  }catch(e){
+    return showToast('Gagal membaca hasil: '+e.message,'danger');
+  }
+
+  if(!s?.exists||s.session?.status!=='Selesai'){
+    return showToast('Psikotes belum selesai','warning');
+  }
+
+  const sess=s.session||{};
+  const app=appById(appId);
+  const candidate=candById(app?.candidate_id);
+  const position=posById(app?.position_id);
+
+  const rows=(s.results||[]).filter(r=>r.test_code!=='OVERALL');
+  const overall=(s.results||[]).find(r=>r.test_code==='OVERALL');
+
+  const resultCards=rows.map(r=>`
+    <div class="border rounded-xl p-4 bg-white">
+      <div class="flex justify-between items-start gap-3">
+        <div>
+          <div class="text-xs uppercase text-slate-400">
+            ${esc(testLabel(r.test_code))}
+          </div>
+          <div class="font-bold text-base mt-1">
+            ${esc(resultValue(r))}
+          </div>
+        </div>
+      </div>
+
+      ${r.interpretation?`
+        <div class="mt-3 pt-3 border-t">
+          <div class="text-xs font-semibold text-slate-500 mb-1">
+            Interpretasi
+          </div>
+          <p class="text-sm text-slate-700 leading-6">
+            ${esc(r.interpretation)}
+          </p>
+        </div>
+      `:''}
+    </div>
+  `).join('');
+
+  openModal(`
+    <div class="p-6 max-h-[85vh] overflow-y-auto">
+
+      <div class="mb-5">
+        <h3 class="font-bold text-xl">Review Hasil Psikotes</h3>
+
+        <p class="text-sm text-slate-500 mt-1">
+          ${esc(candidate?.candidate_name||'-')}
+          · ${esc(position?.position_name||'-')}
+        </p>
+
+        <p class="text-xs text-slate-400 mt-1">
+          Attempt ${esc(sess.attempt_no||1)}
+          · Selesai ${esc(fmt(sess.completed_at))}
+        </p>
+      </div>
+
+      <div class="bg-blue-50 border border-blue-100 rounded-xl p-4 mb-4">
+        <div class="text-xs text-slate-500">Rekomendasi SiPsiko</div>
+        <div class="font-bold text-blue-800 mt-1">
+          ${esc(sess.engine_recommendation||'—')}
+        </div>
+        <div class="text-xs text-slate-500 mt-2">
+          Rekomendasi sistem menjadi bahan pertimbangan. Keputusan recruitment tetap ditetapkan HR.
+        </div>
+      </div>
+
+      <div class="mb-3">
+        <h4 class="font-semibold text-sm">Hasil per Tes</h4>
+      </div>
+
+      <div class="space-y-3">
+        ${resultCards||`
+          <div class="border rounded-xl p-4 text-sm text-slate-400">
+            Detail hasil per tes belum tersedia.
+          </div>
+        `}
+      </div>
+
+      ${overall?.interpretation?`
+        <div class="bg-slate-50 border rounded-xl p-4 mt-4">
+          <div class="text-xs font-semibold text-slate-500 mb-2">
+            Kesimpulan Psikotes
+          </div>
+          <p class="text-sm text-slate-700 leading-6">
+            ${esc(overall.interpretation)}
+          </p>
+        </div>
+      `:''}
+
+      <div class="mt-5">
+        <label class="block text-xs font-semibold text-slate-600 mb-1">
+          Catatan Pertimbangan HR
+        </label>
+
+        <textarea
+          id="v2PsychNotes"
+          rows="4"
+          class="w-full border rounded-lg p-3 text-sm"
+          placeholder="Tuliskan pertimbangan HR sebelum menetapkan keputusan"
+        >${esc(sess.hr_notes||'')}</textarea>
+      </div>
+
+      <div class="grid grid-cols-3 gap-2 mt-4">
+        <button
+          onclick="savePsychReviewV2('${appId}','Lanjut')"
+          class="px-2 py-2 bg-emerald-600 text-white rounded-lg text-sm">
+          Lanjut
+        </button>
+
+        <button
+          onclick="savePsychReviewV2('${appId}','Perlu Review HR')"
+          class="px-2 py-2 bg-amber-500 text-white rounded-lg text-sm">
+          Review
+        </button>
+
+        <button
+          onclick="savePsychReviewV2('${appId}','Tidak Lanjut')"
+          class="px-2 py-2 bg-red-600 text-white rounded-lg text-sm">
+          Tidak Lanjut
+        </button>
+      </div>
+
+      <div class="text-right mt-3">
+        <button
+          onclick="closeModal()"
+          class="px-3 py-2 border rounded-lg text-sm">
+          Batal
+        </button>
+      </div>
+
+    </div>
+  `);
+}
   async function savePsychReview(appId,decision){const notes=document.getElementById('v2PsychNotes')?.value?.trim()||null;const {error}=await sb.rpc('review_psychotest_result',{p_application_id:appId,p_decision:decision,p_hr_notes:notes});if(error)return showToast('Gagal simpan review: '+error.message,'danger');closeModal();await loadPsych(true);if(currentPage==='psychotests')renderPsych(false);injectPsychCard(appId);showToast('Keputusan psikotes: '+decision,'success');}
   async function advanceToInterviewHr(appId){await transitionStage(appId,'Interview HR');}
 
