@@ -1,5 +1,5 @@
 /* ========================================================================== 
-   LAPORAN KANDIDAT TERINTEGRASI PDF V1.4.1 - EXECUTIVE A4
+   LAPORAN KANDIDAT TERINTEGRASI PDF V1.5 - EXECUTIVE GRID A4
    Branch: feature/candidate-dossier-v1
 
    Design constraints:
@@ -15,8 +15,8 @@
   if(window.__ATS_CANDIDATE_DOSSIER_PDF_V1_ACTIVE) return;
   window.__ATS_CANDIDATE_DOSSIER_PDF_V1_ACTIVE=true;
 
-  const VERSION='1.4.1-pdf';
-  const PAGE={w:210,h:297,left:15,right:15,top:20,bottom:282};
+  const VERSION='1.5.0-pdf';
+  const PAGE={w:210,h:297,left:16,right:16,top:20,bottom:282};
   const CONTENT_W=PAGE.w-PAGE.left-PAGE.right;
   const NAVY=[15,23,42], SLATE=[71,85,105], MUTED=[100,116,139], LINE=[226,232,240], SOFT=[248,250,252], BLUE=[37,99,235];
   const TEST_LABELS={CIFT:'Tes Kognitif',PAPIKOSTIK:'PAPI Kostick',INTEGRITY:'Tes Integritas',MSDT:'MSDT',DISC:'DISC',OVERALL:'Kesimpulan'};
@@ -70,22 +70,24 @@
   }
 
   function sectionHeading(ctx,title,subtitle='',minFollowing=6){
-    const subtitleLines=subtitle?wrap(ctx,subtitle,CONTENT_W-9,6.8,'normal'):[];
-    const headingH=subtitle?Math.max(10,6+subtitleLines.length*3.2):7.5;
+    const subtitleLines=subtitle?wrap(ctx,subtitle,CONTENT_W,7.0,'normal'):[];
+    const titleH=5.2;
+    const headingH=titleH+(subtitleLines.length?subtitleLines.length*3.4+2.1:2.3);
     ensure(ctx,headingH+minFollowing);
-    ctx.doc.setFillColor(...BLUE);
-    ctx.doc.roundedRect(PAGE.left,ctx.y,1.6,headingH-1,0.8,0.8,'F');
-    setFont(ctx,10.4,'bold',NAVY);
-    ctx.doc.text(title,PAGE.left+5,ctx.y,{baseline:'top'});
-    if(subtitle){
-      setFont(ctx,6.8,'normal',MUTED);
-      ctx.doc.text(subtitleLines,PAGE.left+5,ctx.y+4.8,{baseline:'top'});
+    setFont(ctx,10.8,'bold',NAVY);
+    ctx.doc.text(title,PAGE.left,ctx.y,{baseline:'top'});
+    const titleW=Math.min(CONTENT_W-12,ctx.doc.getTextWidth(title));
+    ctx.doc.setDrawColor(...BLUE);ctx.doc.setLineWidth(0.45);
+    ctx.doc.line(PAGE.left+titleW+4,ctx.y+2.6,PAGE.w-PAGE.right,ctx.y+2.6);
+    if(subtitleLines.length){
+      setFont(ctx,7.0,'normal',MUTED);
+      ctx.doc.text(subtitleLines,PAGE.left,ctx.y+5.4,{baseline:'top'});
     }
     ctx.y+=headingH;
   }
 
   function microLabel(ctx,label,x,y,color=MUTED){
-    setFont(ctx,6.1,'bold',color);
+    setFont(ctx,6.6,'bold',color);
     ctx.doc.text(String(label||'').toUpperCase(),x,y,{baseline:'top'});
   }
 
@@ -133,10 +135,10 @@
   }
 
   function calloutMetrics(ctx,title,body,width=CONTENT_W,opts={}){
-    const titleSize=opts.titleSize??6.8, bodySize=opts.bodySize??7.7;
+    const titleSize=opts.titleSize??7.6, bodySize=opts.bodySize??8.0;
     const titleLines=wrap(ctx,title,width-8,titleSize,'bold');
     const bodyLines=wrap(ctx,body,width-8,bodySize,'normal');
-    return {titleLines,bodyLines,h:4+titleLines.length*3.1+bodyLines.length*3.55+3.3};
+    return {titleLines,bodyLines,h:4.4+titleLines.length*3.5+bodyLines.length*3.75+3.6};
   }
 
   function callout(ctx,title,body,kind='neutral',opts={}){
@@ -151,9 +153,11 @@
     const metrics=calloutMetrics(ctx,title,body,width,opts);
     ensure(ctx,metrics.h+1.5);
     ctx.doc.setFillColor(...palette.fill);ctx.doc.setDrawColor(...palette.border);
-    ctx.doc.roundedRect(x,ctx.y,width,metrics.h,2,2,'FD');
-    setFont(ctx,opts.titleSize??6.8,'bold',palette.title);ctx.doc.text(metrics.titleLines,x+4,ctx.y+2.6,{baseline:'top'});
-    setFont(ctx,opts.bodySize??7.7,'normal',SLATE);ctx.doc.text(metrics.bodyLines,x+4,ctx.y+3+metrics.titleLines.length*3.1,{baseline:'top'});
+    ctx.doc.roundedRect(x,ctx.y,width,metrics.h,1.6,1.6,'FD');
+    setFont(ctx,opts.titleSize??7.6,'bold',palette.title);
+    ctx.doc.text(metrics.titleLines,x+4,ctx.y+2.7,{baseline:'top'});
+    setFont(ctx,opts.bodySize??8.0,'normal',SLATE);
+    ctx.doc.text(metrics.bodyLines,x+4,ctx.y+3.3+metrics.titleLines.length*3.5,{baseline:'top'});
     ctx.y+=metrics.h+(opts.gap??2.2);
     return metrics.h;
   }
@@ -188,18 +192,19 @@
     if(!list.length)return;
     const total=columns.reduce((s,c)=>s+c.width,0);
     const widths=columns.map(c=>c.width/total*CONTENT_W);
-    const padX=opts.padX??1.8, padY=opts.padY??1.7, lineH=opts.lineH??3.25, fontSize=opts.fontSize??6.8, headerH=opts.headerH??6.3;
+    const padX=opts.padX??2, padY=opts.padY??1.8, lineH=opts.lineH??3.35, fontSize=opts.fontSize??7.0, headerH=opts.headerH??6.8;
     function header(){
       ensure(ctx,headerH+4);
       ctx.doc.setFillColor(241,245,249);
-      ctx.doc.rect(PAGE.left,ctx.y,CONTENT_W,headerH,'F');
+      ctx.doc.setDrawColor(...LINE);
+      ctx.doc.rect(PAGE.left,ctx.y,CONTENT_W,headerH,'FD');
       let x=PAGE.left;
       columns.forEach((c,i)=>{
-        setFont(ctx,6.2,'bold',SLATE);
-        ctx.doc.text(c.label,x+padX,ctx.y+1.8,{baseline:'top'});
+        if(i>0)ctx.doc.line(x,ctx.y,x,ctx.y+headerH);
+        setFont(ctx,6.7,'bold',SLATE);
+        ctx.doc.text(c.label,x+padX,ctx.y+2.0,{baseline:'top'});
         x+=widths[i];
       });
-      ctx.doc.setDrawColor(...LINE);ctx.doc.line(PAGE.left,ctx.y+headerH,PAGE.left+CONTENT_W,ctx.y+headerH);
       ctx.y+=headerH;
     }
     header();
@@ -207,14 +212,65 @@
       const cells=columns.map((c,i)=>wrap(ctx,present(row[c.key])?row[c.key]:'—',widths[i]-padX*2,fontSize,'normal'));
       const rowH=Math.max(1,...cells.map(x=>x.length))*lineH+padY*2;
       if(ctx.y+rowH>PAGE.bottom){addPage(ctx);header();}
+      ctx.doc.setDrawColor(...LINE);
+      ctx.doc.rect(PAGE.left,ctx.y,CONTENT_W,rowH);
       let x=PAGE.left;
       cells.forEach((lines,i)=>{
+        if(i>0)ctx.doc.line(x,ctx.y,x,ctx.y+rowH);
         setFont(ctx,fontSize,i===0&&opts.boldFirst?'bold':'normal',i===0&&opts.boldFirst?NAVY:SLATE);
         ctx.doc.text(lines,x+padX,ctx.y+padY,{baseline:'top'});
         x+=widths[i];
       });
-      ctx.doc.setDrawColor(...LINE);ctx.doc.line(PAGE.left,ctx.y+rowH,PAGE.left+CONTENT_W,ctx.y+rowH);
       ctx.y+=rowH;
+    });
+    ctx.y+=2.4;
+  }
+
+
+  function infoRow(ctx,label,value,opts={}){
+    if(!present(value))return;
+    const labelW=opts.labelW??39;
+    const bodyX=PAGE.left+labelW;
+    const bodyW=CONTENT_W-labelW;
+    const bodySize=opts.bodySize??8.2;
+    const lines=wrap(ctx,value,bodyW-4,bodySize,opts.bold?'bold':'normal');
+    const h=Math.max(8.2,4.0+lines.length*3.8);
+    ensure(ctx,h);
+    if(opts.fill){
+      ctx.doc.setFillColor(...opts.fill);
+      ctx.doc.rect(PAGE.left,ctx.y,CONTENT_W,h,'F');
+    }
+    microLabel(ctx,label,PAGE.left+2.5,ctx.y+2.2,opts.labelColor||MUTED);
+    setFont(ctx,bodySize,opts.bold?'bold':'normal',opts.color||SLATE);
+    ctx.doc.text(lines,bodyX,ctx.y+2.0,{baseline:'top'});
+    ctx.doc.setDrawColor(...LINE);
+    ctx.doc.line(PAGE.left,ctx.y+h,PAGE.w-PAGE.right,ctx.y+h);
+    ctx.y+=h;
+  }
+
+  function profileRows(ctx,rows){
+    const half=CONTENT_W/2;
+    const labelW=31;
+    const valueW=half-labelW-3;
+    arr(rows).forEach(row=>{
+      const left=row[0]||[], right=row[1]||[];
+      const lLines=present(left[1])?wrap(ctx,left[1],valueW,8.0,'bold'):[];
+      const rLines=present(right[1])?wrap(ctx,right[1],valueW,8.0,'bold'):[];
+      const h=Math.max(8.0,4.0+Math.max(lLines.length,rLines.length)*3.55);
+      ensure(ctx,h);
+      if(present(left[0])){
+        microLabel(ctx,left[0],PAGE.left+1.5,ctx.y+2);
+        setFont(ctx,8.0,'bold',NAVY);ctx.doc.text(lLines,PAGE.left+labelW,ctx.y+1.9,{baseline:'top'});
+      }
+      const rx=PAGE.left+half;
+      if(present(right[0])){
+        microLabel(ctx,right[0],rx+1.5,ctx.y+2);
+        setFont(ctx,8.0,'bold',NAVY);ctx.doc.text(rLines,rx+labelW,ctx.y+1.9,{baseline:'top'});
+      }
+      ctx.doc.setDrawColor(...LINE);
+      ctx.doc.line(PAGE.left,ctx.y+h,PAGE.w-PAGE.right,ctx.y+h);
+      ctx.doc.line(PAGE.left+half,ctx.y,PAGE.left+half,ctx.y+h);
+      ctx.y+=h;
     });
     ctx.y+=2;
   }
@@ -256,20 +312,19 @@
   function recruitmentProgress(ctx){
     const labels=['Lamaran','Screening','Psikotes','Interview HR','Interview User','Offering'];
     const current=Math.min(5,Math.max(0,stageIndex(ctx.model?.application?.current_stage)));
-    const start=PAGE.left+6, end=PAGE.w-PAGE.right-6, width=end-start, y=ctx.y+3.2;
-    ensure(ctx,12);
-    ctx.doc.setLineWidth(0.5);
+    const start=PAGE.left+5, end=PAGE.w-PAGE.right-5, width=end-start, y=ctx.y+3;
+    ensure(ctx,12.5);
+    ctx.doc.setLineWidth(0.45);
     ctx.doc.setDrawColor(...LINE);ctx.doc.line(start,y,end,y);
     labels.forEach((label,i)=>{
       const x=start+(width/(labels.length-1))*i;
       const completed=i<current, active=i===current;
       ctx.doc.setFillColor(...(completed||active?BLUE:[226,232,240]));
-      ctx.doc.circle(x,y,active?2.1:1.6,'F');
-      setFont(ctx,5.5,active?'bold':'normal',active?NAVY:MUTED);
-      const parts=ctx.doc.splitTextToSize(label,25);
-      ctx.doc.text(parts,x,y+3.2,{align:'center',baseline:'top'});
+      ctx.doc.circle(x,y,active?2.0:1.5,'F');
+      setFont(ctx,5.9,active?'bold':'normal',active?NAVY:MUTED);
+      ctx.doc.text(ctx.doc.splitTextToSize(label,27),x,y+3.0,{align:'center',baseline:'top'});
     });
-    ctx.y+=11.5;
+    ctx.y+=11.8;
   }
 
   function cvSummary(model){
@@ -313,101 +368,84 @@
 
   function cover(ctx){
     const m=ctx.model,a=m.application||{},c=m.candidate||{},p=m.position||{},co=m.company||{};
-    ensure(ctx,31);
-    setFont(ctx,7.1,'bold',NAVY);ctx.doc.text('LAPORAN KANDIDAT TERINTEGRASI',PAGE.left,ctx.y,{baseline:'top'});
-    ctx.y+=4.2;
-    setFont(ctx,6.1,'normal',MUTED);ctx.doc.text('Executive Recruitment Assessment Report',PAGE.left,ctx.y,{baseline:'top'});
-    ctx.y+=5.2;
+    ensure(ctx,33);
+    setFont(ctx,11.0,'bold',NAVY);
+    ctx.doc.text('LAPORAN KANDIDAT TERINTEGRASI',PAGE.left,ctx.y,{baseline:'top'});
+    setFont(ctx,7.1,'normal',MUTED);
+    ctx.doc.text('Executive Recruitment Assessment Report',PAGE.left,ctx.y+4.8,{baseline:'top'});
+    ctx.y+=11.2;
+
     const status=humanResult(clean(m.overall?.label)||clean(a.current_stage)||'Dalam Proses');
-    const statusW=48;
-    const nameW=CONTENT_W-statusW-6;
-    setFont(ctx,16.5,'bold',NAVY);
+    const statusW=49;
+    const nameW=CONTENT_W-statusW-7;
+    setFont(ctx,18.0,'bold',NAVY);
     const nameLines=ctx.doc.splitTextToSize(c.candidate_name||'—',nameW);
     ctx.doc.text(nameLines,PAGE.left,ctx.y,{baseline:'top'});
-    pill(ctx,status,PAGE.w-PAGE.right-statusW,ctx.y-0.5,statusW);
-    ctx.y+=Math.max(8.5,nameLines.length*6.2);
-    setFont(ctx,8.2,'normal',SLATE);
+    pill(ctx,status,PAGE.w-PAGE.right-statusW,ctx.y+0.2,statusW);
+    ctx.y+=Math.max(9.5,nameLines.length*6.7);
+
+    setFont(ctx,9.0,'normal',SLATE);
     ctx.doc.text(`${p.position_name||'Posisi tidak tercatat'} · ${co.brand||co.company_name||'Perusahaan tidak tercatat'}`,PAGE.left,ctx.y,{baseline:'top'});
-    ctx.y+=5;
+    ctx.y+=5.2;
     const meta=[
       `Tahap: ${a.current_stage||'—'}`,
       `Lamaran: ${fmtDateOnly(a.application_date||a.applied_at||a.created_at)}`,
       `Status: ${a.status||'—'}`
     ];
     if(present(c.source||a.source))meta.push(`Sumber: ${c.source||a.source}`);
-    setFont(ctx,6.5,'normal',MUTED);
+    setFont(ctx,7.0,'normal',MUTED);
     ctx.doc.text(meta.join('   ·   '),PAGE.left,ctx.y,{baseline:'top'});
-    ctx.y+=5.2;
-    ctx.doc.setDrawColor(...LINE);ctx.doc.line(PAGE.left,ctx.y,PAGE.w-PAGE.right,ctx.y);
-    ctx.y+=4;
+    ctx.y+=5.3;
+    ctx.doc.setDrawColor(...LINE);ctx.doc.setLineWidth(0.35);
+    ctx.doc.line(PAGE.left,ctx.y,PAGE.w-PAGE.right,ctx.y);
+    ctx.y+=4.0;
   }
 
   function executive(ctx){
     const m=ctx.model,a=m.application||{};
-    sectionHeading(ctx,'Ringkasan Eksekutif','Status proses dan tindakan yang perlu dilakukan HR.',22);
+    sectionHeading(ctx,'Ringkasan Eksekutif','',22);
     const overall=humanResult(clean(m.overall?.label)||a.current_stage||'Dalam Proses');
-    const action=nextAction(m);
-    const attention=currentAttention(m);
-    const gap=3, leftW=55, rightW=CONTENT_W-leftW-gap, top=ctx.y;
-    const statusLines=wrap(ctx,a.current_stage||'—',leftW-7,8.1,'bold');
-    const actionLines=wrap(ctx,action,rightW-7,7.4,'normal');
-    const h=Math.max(17,8+statusLines.length*3.8,7+actionLines.length*3.55);
-    ensure(ctx,h+18);
-
-    ctx.doc.setFillColor(...SOFT);ctx.doc.setDrawColor(...LINE);ctx.doc.roundedRect(PAGE.left,top,leftW,h,1.8,1.8,'FD');
-    microLabel(ctx,'Status Saat Ini',PAGE.left+3.2,top+2.5);
-    setFont(ctx,8.1,'bold',NAVY);ctx.doc.text(statusLines,PAGE.left+3.2,top+6.2,{baseline:'top'});
-    setFont(ctx,6.7,'bold',statusTone(overall).text);
-    ctx.doc.text(ctx.doc.splitTextToSize(overall,leftW-7),PAGE.left+3.2,top+6.5+statusLines.length*3.8,{baseline:'top'});
-
-    const rx=PAGE.left+leftW+gap;
-    ctx.doc.setFillColor(255,255,255);ctx.doc.setDrawColor(...LINE);ctx.doc.roundedRect(rx,top,rightW,h,1.8,1.8,'FD');
-    microLabel(ctx,'Tindakan HR',rx+3.2,top+2.5);
-    setFont(ctx,7.4,'normal',SLATE);ctx.doc.text(actionLines,rx+3.2,top+6.2,{baseline:'top'});
-    ctx.y+=h+2.4;
-
-    const attentionLines=wrap(ctx,attention,CONTENT_W-10,6.9,'normal');
-    const noteH=Math.max(8,4.5+attentionLines.length*3.25);
-    ensure(ctx,noteH+12);
-    ctx.doc.setFillColor(255,251,235);ctx.doc.setDrawColor(253,230,138);
-    ctx.doc.roundedRect(PAGE.left,ctx.y,CONTENT_W,noteH,1.5,1.5,'FD');
-    microLabel(ctx,'Catatan Perhatian',PAGE.left+3.2,ctx.y+2,[146,64,14]);
-    setFont(ctx,6.9,'normal',SLATE);ctx.doc.text(attentionLines,PAGE.left+34,ctx.y+2,{baseline:'top'});
-    ctx.y+=noteH+2.5;
+    infoRow(ctx,'Status Saat Ini',`${a.current_stage||'—'}  ·  ${overall}`,{
+      bold:true,bodySize:8.4,color:statusTone(overall).text,fill:[248,250,252]
+    });
+    infoRow(ctx,'Tindakan HR',nextAction(m),{bodySize:8.2});
+    infoRow(ctx,'Catatan Perhatian',currentAttention(m),{
+      bodySize:8.1,labelColor:[146,64,14],fill:[255,251,235]
+    });
+    ctx.y+=2;
     recruitmentProgress(ctx);
   }
 
   function profile(ctx){
     const c=ctx.model.candidate||{};
-    sectionHeading(ctx,'Profil Kandidat','Data profil yang tersimpan pada aplikasi kandidat.',16);
-    compactGrid(ctx,[
-      ['Pendidikan',c.education],['Jurusan',c.major],['Domisili',c.city],
-      ['Pengalaman yang Dilaporkan',present(c.experience)?`${c.experience}${Number.isFinite(Number(c.experience))?' tahun':''}`:null],
-      ['Posisi Terakhir',c.last_role],['Perusahaan Terakhir',c.last_company],
-      ['Ekspektasi Gaji',present(c.expected_salary)?money(c.expected_salary):null],['Notice Period',c.notice_period],
-      ['Bersedia Shift',c.willing_shift],['Alasan Melamar',c.apply_reason]
-    ],2,{valueSize:7.8,rowGap:0.5});
-    ctx.y+=1;
+    sectionHeading(ctx,'Profil Kandidat','',14);
+    profileRows(ctx,[
+      [['Pendidikan',c.education],['Jurusan',c.major]],
+      [['Domisili',c.city],['Pengalaman Dilaporkan',present(c.experience)?`${c.experience}${Number.isFinite(Number(c.experience))?' tahun':''}`:null]],
+      [['Posisi Terakhir',c.last_role],['Perusahaan Terakhir',c.last_company]],
+      [['Ekspektasi Gaji',present(c.expected_salary)?money(c.expected_salary):null],['Notice Period',c.notice_period]],
+      [['Bersedia Shift',c.willing_shift],['Alasan Melamar',c.apply_reason]]
+    ]);
   }
 
   function cvSection(ctx){
     const x=ctx.model.cvExtraction||{state:'module_unavailable'};
     const summary=cvSummary(ctx.model);
-    const metrics=calloutMetrics(ctx,summary.title,summary.body,CONTENT_W,{titleSize:6.7,bodySize:7.4});
-    sectionHeading(ctx,'Validasi CV','Pembacaan otomatis bersifat pendukung dan tidak menggantikan verifikasi HR.',metrics.h+2);
-    callout(ctx,summary.title,summary.body,summary.kind,{titleSize:6.7,bodySize:7.4,gap:1.8});
+    const metrics=calloutMetrics(ctx,summary.title,summary.body,CONTENT_W,{titleSize:7.6,bodySize:8.0});
+    sectionHeading(ctx,'Validasi CV','',metrics.h+2);
+    callout(ctx,summary.title,summary.body,summary.kind,{titleSize:7.6,bodySize:8.0,gap:2.0});
 
     if(!['available','success','ok'].includes(String(x.state||'').toLowerCase()))return;
     const sec=x.sections||{};
     const groups=[['Pendidikan',sec.education],['Pengalaman Kerja',sec.experience],['Keahlian / Kompetensi',sec.skills],['Sertifikasi / Pelatihan',sec.certifications],['Bahasa',sec.languages]].filter(([,items])=>arr(items).length);
     if(groups.length){
       groups.forEach(([label,items])=>{
-        microLabel(ctx,label,PAGE.left,ctx.y);ctx.y+=3.5;
-        bullets(ctx,arr(items).slice(0,6),{size:7.2,lineH:3.45,gap:0});
+        microLabel(ctx,label,PAGE.left,ctx.y);ctx.y+=3.7;
+        bullets(ctx,arr(items).slice(0,6),{size:7.8,lineH:3.7,gap:0});
       });
     }else if(arr(x.previewLines).length){
-      microLabel(ctx,'Cuplikan CV',PAGE.left,ctx.y);ctx.y+=3.5;
-      bullets(ctx,arr(x.previewLines).slice(0,6),{size:7.2,lineH:3.45,gap:0});
+      microLabel(ctx,'Cuplikan CV',PAGE.left,ctx.y);ctx.y+=3.7;
+      bullets(ctx,arr(x.previewLines).slice(0,6),{size:7.8,lineH:3.7,gap:0});
     }
   }
 
@@ -436,25 +474,28 @@
 
   function screening(ctx){
     const block=ctx.model.screening;
-    sectionHeading(ctx,'Screening','Hasil sistem, keputusan HR, dan evidence persyaratan ditampilkan terpisah.',18);
+    sectionHeading(ctx,'Screening','',18);
     if(block?.state==='error'){
-      callout(ctx,'Data Screening Tidak Dapat Dimuat','Terjadi error saat membaca data Screening. Kondisi sistem tidak boleh digunakan sebagai dasar keputusan kandidat.','danger',{bodySize:7.4});return;
+      callout(ctx,'Data Screening Tidak Dapat Dimuat','Terjadi error saat membaca data Screening. Kondisi sistem tidak boleh digunakan sebagai dasar keputusan kandidat.','danger',{bodySize:8.0});return;
     }
     if(block?.state!=='available'){
-      callout(ctx,'Belum Ada Data Screening','Belum ditemukan hasil Screening tersimpan untuk kandidat ini.','neutral',{bodySize:7.4});return;
+      callout(ctx,'Belum Ada Data Screening','Belum ditemukan hasil Screening tersimpan untuk kandidat ini.','neutral',{bodySize:8.0});return;
     }
     const s=block.data||{};
-    compactGrid(ctx,[
-      ['Hasil Sistem',humanResult(s.systemStatus)],['Keputusan HR',s.reviewDecision?humanResult(s.reviewDecision):null],
-      ['Match Preference',s.matchScore==null?null:`${Number(s.matchScore).toFixed(1)}%`],['Tanggal Screening',fmtDate(s.screenedAt)]
-    ],2,{valueSize:7.6,rowGap:0.4});
-    if(s.reviewNotes) callout(ctx,'Catatan Review HR',`${s.reviewNotes}${s.reviewedBy||s.reviewedAt?`\n${s.reviewedBy||'Reviewer tidak tercatat'} · ${fmtDate(s.reviewedAt)}`:''}`,'info',{bodySize:7.3,gap:1.5});
+    const summaryParts=[
+      `Hasil Sistem: ${humanResult(s.systemStatus)}`,
+      s.reviewDecision?`Keputusan HR: ${humanResult(s.reviewDecision)}`:null,
+      s.matchScore==null?null:`Match: ${Number(s.matchScore).toFixed(1)}%`,
+      `Tanggal: ${fmtDate(s.screenedAt)}`
+    ].filter(Boolean);
+    infoRow(ctx,'Ringkasan Screening',summaryParts.join('   ·   '),{bodySize:7.8,fill:[248,250,252]});
+    if(s.reviewNotes) callout(ctx,'Catatan Review HR',`${s.reviewNotes}${s.reviewedBy||s.reviewedAt?`\n${s.reviewedBy||'Reviewer tidak tercatat'} · ${fmtDate(s.reviewedAt)}`:''}`,'info',{bodySize:7.9,gap:1.7});
     const details=arr(s.details);
     if(details.length){
       table(ctx,[
-        {label:'Aspek',key:'aspect',width:25},
-        {label:'Persyaratan Posisi',key:'requirement',width:78},
-        {label:'Evidence Kandidat',key:'actual',width:45},
+        {label:'Aspek',key:'aspect',width:27},
+        {label:'Persyaratan Posisi',key:'requirement',width:73},
+        {label:'Evidence Kandidat',key:'actual',width:48},
         {label:'Status',key:'result',width:32}
       ],details.map(x=>{
         const rawRequirement=clean(x.text||x.requirement_id)||'—';
@@ -464,7 +505,7 @@
           actual:present(x.actual)?clean(x.actual):'Belum dapat diverifikasi',
           result:screeningDetailResult(x.result||x.rule,x.actual)
         };
-      }),{fontSize:6.6,lineH:3.15,padY:1.6,boldFirst:true});
+      }),{fontSize:7.0,lineH:3.35,padY:1.7,boldFirst:true,headerH:7.0});
     }
   }
 
@@ -540,41 +581,39 @@
   function timeline(ctx){
     const rows=arr(ctx.model.timeline);
     if(!rows.length)return;
-    sectionHeading(ctx,'Riwayat Rekrutmen','Hanya event yang benar-benar tersimpan di recruitment history.',rows.length<=3?7:14);
+    sectionHeading(ctx,'Riwayat Rekrutmen','',rows.length<=3?7:14);
     if(rows.length<=3){
       rows.forEach(x=>{
         const date=fmtDate(x.date), event=clean(x.event||'Aktivitas');
         const meta=[x.actor?`Aktor: ${x.actor}`:null,x.notes?clean(x.notes):null].filter(Boolean).join(' · ');
-        const eventLines=wrap(ctx,event,CONTENT_W-43,7.3,'bold');
-        const metaLines=meta?wrap(ctx,meta,CONTENT_W-43,6.5,'normal'):[];
-        const h=Math.max(6.2,eventLines.length*3.5+(metaLines.length?metaLines.length*3+1:0));
+        const eventLines=wrap(ctx,event,CONTENT_W-47,7.8,'bold');
+        const metaLines=meta?wrap(ctx,meta,CONTENT_W-47,7.0,'normal'):[];
+        const h=Math.max(6.5,eventLines.length*3.7+(metaLines.length?metaLines.length*3.3+1:0));
         ensure(ctx,h+1);
-        setFont(ctx,6.5,'normal',MUTED);ctx.doc.text(date,PAGE.left,ctx.y,{baseline:'top'});
-        setFont(ctx,7.3,'bold',NAVY);ctx.doc.text(eventLines,PAGE.left+43,ctx.y,{baseline:'top'});
-        if(metaLines.length){setFont(ctx,6.5,'normal',SLATE);ctx.doc.text(metaLines,PAGE.left+43,ctx.y+eventLines.length*3.5+0.6,{baseline:'top'});}
+        setFont(ctx,7.0,'normal',MUTED);ctx.doc.text(date,PAGE.left,ctx.y,{baseline:'top'});
+        setFont(ctx,7.8,'bold',NAVY);ctx.doc.text(eventLines,PAGE.left+47,ctx.y,{baseline:'top'});
+        if(metaLines.length){setFont(ctx,7.0,'normal',SLATE);ctx.doc.text(metaLines,PAGE.left+47,ctx.y+eventLines.length*3.7+0.6,{baseline:'top'});}
         ctx.y+=h;
-        ctx.doc.setDrawColor(...LINE);ctx.doc.line(PAGE.left,ctx.y,PAGE.left+CONTENT_W,ctx.y);ctx.y+=1.2;
+        ctx.doc.setDrawColor(...LINE);ctx.doc.line(PAGE.left,ctx.y,PAGE.w-PAGE.right,ctx.y);ctx.y+=1.2;
       });
       ctx.y+=0.5;
       return;
     }
     table(ctx,[
       {label:'Tanggal',key:'date',width:38},{label:'Event',key:'event',width:48},{label:'Aktor',key:'actor',width:38},{label:'Catatan',key:'notes',width:56}
-    ],rows.map(x=>({date:fmtDate(x.date),event:x.event||'Aktivitas',actor:x.actor||'—',notes:x.notes||'—'})),{fontSize:6.4});
+    ],rows.map(x=>({date:fmtDate(x.date),event:x.event||'Aktivitas',actor:x.actor||'—',notes:x.notes||'—'})),{fontSize:6.9});
   }
 
   function attachments(ctx){
     const m=ctx.model, docs=arr(m.attachments?.psychDocuments);
-    const cvText=m.attachments?.cvAvailable?'CV tersedia - file asli disertakan terpisah':'CV belum tersedia';
+    const cvText=m.attachments?.cvAvailable?'CV tersedia; file asli disertakan terpisah':'CV belum tersedia';
     const psychText=docs.length?`Psikotes: ${docs.length} dokumen tersimpan`:'Psikotes belum tersedia';
-    const labelW=31, bodyW=CONTENT_W-labelW;
-    const lines=wrap(ctx,`${cvText} · ${psychText}`,bodyW,6.35,'normal');
-    const h=Math.max(3.8,lines.length*3.05)+0.8;
-    if(ctx.y+h>PAGE.bottom)addPage(ctx);
-    microLabel(ctx,'Dokumen Pendukung',PAGE.left,ctx.y);
-    setFont(ctx,6.35,'normal',SLATE);
-    ctx.doc.text(lines,PAGE.left+labelW,ctx.y,{baseline:'top'});
-    ctx.y+=h;
+    sectionHeading(ctx,'Dokumen Pendukung','',7);
+    const lines=wrap(ctx,`${cvText}   ·   ${psychText}`,CONTENT_W,7.7,'normal');
+    ensure(ctx,Math.max(5,lines.length*3.6));
+    setFont(ctx,7.7,'normal',SLATE);
+    ctx.doc.text(lines,PAGE.left,ctx.y,{baseline:'top'});
+    ctx.y+=Math.max(5,lines.length*3.6);
   }
 
   function renderAll(ctx){
@@ -598,11 +637,15 @@
     const appId=ctx.model?.application?.application_id||'—';
     for(let p=1;p<=total;p++){
       doc.setPage(p);
-      doc.setDrawColor(...LINE);doc.line(PAGE.left,14.5,PAGE.w-PAGE.right,14.5);
-      setFont(ctx,6.1,'bold',SLATE);doc.text(p===1?'MEGROUP · RECRUITMENT':'LAPORAN KANDIDAT TERINTEGRASI',PAGE.left,8.5,{baseline:'top'});
-      setFont(ctx,6,'normal',MUTED);doc.text(candidate,PAGE.w-PAGE.right,8.5,{align:'right',baseline:'top'});
-      doc.setDrawColor(...LINE);doc.line(PAGE.left,286,PAGE.w-PAGE.right,286);
-      setFont(ctx,5.8,'normal',MUTED);doc.text(`Internal HR · Rahasia · ${appId}`,PAGE.left,289,{baseline:'top'});
+      doc.setDrawColor(...LINE);doc.setLineWidth(0.3);
+      doc.line(PAGE.left,14.5,PAGE.w-PAGE.right,14.5);
+      setFont(ctx,6.2,'bold',SLATE);
+      doc.text(p===1?'MEGROUP · RECRUITMENT':'LAPORAN KANDIDAT TERINTEGRASI',PAGE.left,8.5,{baseline:'top'});
+      setFont(ctx,6.1,'normal',MUTED);
+      doc.text(candidate,PAGE.w-PAGE.right,8.5,{align:'right',baseline:'top'});
+      doc.line(PAGE.left,286,PAGE.w-PAGE.right,286);
+      setFont(ctx,6.0,'normal',MUTED);
+      doc.text(`Internal HR · Rahasia · ${appId}`,PAGE.left,289,{baseline:'top'});
       doc.text(`Halaman ${p} dari ${total}`,PAGE.w-PAGE.right,289,{align:'right',baseline:'top'});
     }
   }
@@ -663,7 +706,7 @@
     const previewRoot=root.querySelector('#candidateDossierPreviewV1');
     const info=previewRoot?.previousElementSibling;
     if(info && /(Fase PDF|Fase Laporan|Fase Paket Dokumen|Fase Paket)/i.test(info.textContent||'')){
-      info.innerHTML='<b>Laporan PDF V1.4.1:</b> final visual polish Executive Recruitment Assessment Report. Paket Dokumen tetap menggunakan PDF dan model canonical yang sama.';
+      info.innerHTML='<b>Laporan PDF V1.5:</b> final visual polish Executive Recruitment Assessment Report. Paket Dokumen tetap menggunakan PDF dan model canonical yang sama.';
     }
   }
 
@@ -690,5 +733,5 @@
 
   installOpenHook();
   document.addEventListener('DOMContentLoaded',()=>setTimeout(installOpenHook,1800));
-  console.log('%cLaporan Kandidat PDF V1.4.1 active','color:#2563eb;font-weight:bold');
+  console.log('%cLaporan Kandidat PDF V1.5 active','color:#2563eb;font-weight:bold');
 })();
