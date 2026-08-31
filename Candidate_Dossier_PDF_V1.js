@@ -15,7 +15,7 @@
   if(window.__ATS_CANDIDATE_DOSSIER_PDF_V1_ACTIVE) return;
   window.__ATS_CANDIDATE_DOSSIER_PDF_V1_ACTIVE=true;
 
-  const VERSION='1.6.0-pdf';
+  const VERSION='1.6.1-pdf';
   const PAGE={w:210,h:297,left:16,right:16,top:20,bottom:282};
   const CONTENT_W=PAGE.w-PAGE.left-PAGE.right;
   const NAVY=[15,23,42], SLATE=[71,85,105], MUTED=[100,116,139], LINE=[226,232,240], SOFT=[248,250,252], BLUE=[37,99,235];
@@ -325,21 +325,54 @@
     ctx.y+=9.7;
   }
 
+  function cvValidationScoreText(v){
+    return Number.isFinite(Number(v?.nameScore))?`${Math.round(Number(v.nameScore)*100)}%`:null;
+  }
+
+  function cvValidationIdentityText(v){
+    if(!v)return'';
+    const parts=[];
+    if(present(v.candidateName))parts.push(`Nama form: ${clean(v.candidateName)}`);
+    if(present(v.cvName))parts.push(`Nama CV: ${clean(v.cvName)}`);
+    const score=cvValidationScoreText(v);if(score)parts.push(`Kecocokan: ${score}`);
+    return parts.join(' · ');
+  }
+
   function cvSummary(model){
+    const v=model?.cvValidation||null;
     const x=model?.cvExtraction||{state:'module_unavailable'};
+    if(v){
+      const identity=cvValidationIdentityText(v);
+      const suffix=identity?` ${identity}.`:'';
+      if(v.gate==='allow'||String(v.label||'').toUpperCase()==='VALID')return {title:'CV Valid',body:`CV berhasil dibaca, terindikasi sebagai CV, dan identitas kandidat konsisten.${suffix}`,kind:'good'};
+      if(v.label==='NAMA PERLU KONFIRMASI')return {title:'Nama CV Perlu Konfirmasi',body:`CV terbaca, tetapi nama pada CV tidak identik dengan nama form.${suffix} Verifikasi HR diperlukan sebelum keputusan Screening. Kandidat tidak ditolak otomatis.`,kind:'warn'};
+      if(v.label==='IDENTITAS TERINDIKASI BERBEDA')return {title:'Identitas Terindikasi Berbeda',body:`Nama pada CV terindikasi berbeda signifikan dari data lamaran.${suffix} Klarifikasi kandidat sebelum keputusan; kondisi ini tidak melakukan auto-reject.`,kind:'danger'};
+      if(v.label==='CV SCAN / TEKS TIDAK TERBACA')return {title:'Review Manual Diperlukan',body:'CV terindikasi berupa scan/gambar sehingga identitas dan isi dokumen belum dapat diverifikasi otomatis. HR perlu membuka CV asli secara manual sebelum keputusan Screening.',kind:'warn'};
+      if(v.label==='CV BELUM TERSEDIA')return {title:'CV Belum Tersedia',body:'Belum ada CV kandidat yang dapat diverifikasi. Minta kandidat melengkapi CV sebelum keputusan Screening.',kind:'warn'};
+      if(v.gate==='system_error'||v.label==='ERROR SISTEM CV')return {title:'Error Sistem CV',body:'Validasi CV mengalami kendala sistem. Coba ulang atau verifikasi file asli secara manual; error sistem tidak boleh digunakan sebagai alasan menolak kandidat.',kind:'danger'};
+      if(v.label==='FORMAT CV PERLU REVIEW')return {title:'Dokumen CV Perlu Review',body:clean(v.recommendation)||'Dokumen belum dapat dipastikan sebagai CV yang valid. Verifikasi file asli secara manual sebelum keputusan Screening.',kind:'warn'};
+      return {title:clean(v.label)||'CV Perlu Review',body:clean(v.recommendation)||'Verifikasi CV secara manual sebelum keputusan Screening.',kind:v.tone==='red'?'danger':v.tone==='emerald'?'good':'warn'};
+    }
     if(x.state==='not_available')return {title:'CV Belum Tersedia',body:'Belum ada CV kandidat yang dapat diverifikasi. Keputusan screening tidak boleh didasarkan pada asumsi data CV.',kind:'warn'};
     if(x.state==='module_unavailable')return {title:'Review Manual Diperlukan',body:'Pembacaan CV otomatis tidak tersedia saat laporan dibuat. Verifikasi file asli secara manual; kondisi sistem ini tidak memengaruhi keputusan kandidat.',kind:'warn'};
     if(x.state==='unsupported')return {title:'Format CV Perlu Review',body:x.reason==='DOC_LEGACY_NOT_SUPPORTED'?'Format .DOC lama belum dapat dibaca otomatis. Verifikasi file asli secara manual atau gunakan PDF/DOCX bila diperlukan.':'Format CV belum didukung untuk pembacaan otomatis. Verifikasi file asli secara manual.',kind:'warn'};
-    if(x.state==='text_unavailable')return {title:'Review Manual Diperlukan',body:'CV tersedia, namun isi dokumen belum dapat dibaca otomatis karena terindikasi berupa scan/gambar. HR perlu memverifikasi CV asli secara manual. Kondisi ini tidak memengaruhi keputusan kandidat secara otomatis.',kind:'warn'};
-    if(x.state==='error')return {title:'Error Sistem CV',body:'CV tidak dapat dibaca otomatis saat laporan dibuat. Verifikasi file asli secara manual; error sistem tidak boleh memengaruhi keputusan kandidat.',kind:'danger'};
+    if(x.state==='text_unavailable'||x.state==='empty')return {title:'Review Manual Diperlukan',body:'CV tersedia, namun isi dokumen belum dapat diverifikasi otomatis. HR perlu memverifikasi CV asli secara manual. Kondisi ini tidak memengaruhi keputusan kandidat secara otomatis.',kind:'warn'};
+    if(x.state==='error')return {title:'CV Tidak Dapat Diproses',body:'CV tidak dapat dibaca otomatis saat laporan dibuat. Verifikasi file asli secara manual; kegagalan pemrosesan tidak boleh memengaruhi keputusan kandidat secara otomatis.',kind:'danger'};
     return {title:x.verified===true?'CV Terverifikasi':'CV Berhasil Dibaca',body:x.verified===true?'Isi CV telah dibaca otomatis dan berstatus terverifikasi oleh HR.':'Isi CV berhasil dibaca otomatis, namun hasil pembacaan tetap merupakan data pendukung sampai diverifikasi HR.',kind:x.verified===true?'good':'info'};
   }
 
   function nextAction(model){
     const stage=clean(model?.application?.current_stage).toLowerCase();
-    const cv=model?.cvExtraction||{};
+    const cv=model?.cvExtraction||{},v=model?.cvValidation||null;
     if(/screen/.test(stage)){
-      if(['text_unavailable','unsupported','module_unavailable','error','not_available'].includes(cv.state))return'Review CV asli, verifikasi persyaratan Screening HR, lalu tetapkan keputusan screening.';
+      if(v&&v.gate!=='allow'){
+        if(v.gate==='system_error')return'Coba ulang validasi CV atau verifikasi file asli secara manual; jangan gunakan error sistem sebagai dasar keputusan kandidat.';
+        if(v.candidateAction==='clarify')return'Verifikasi identitas/nama pada CV, lalu review persyaratan Screening HR dan tetapkan keputusan.';
+        if(v.candidateAction==='reupload')return'Verifikasi dokumen CV; bila diperlukan minta kandidat mengunggah CV yang benar/lengkap sebelum keputusan Screening.';
+        return'Review CV asli secara manual, lalu verifikasi persyaratan Screening HR dan tetapkan keputusan.';
+      }
+      if(v?.gate==='allow')return'Review persyaratan Screening HR dan tetapkan keputusan untuk tahap berikutnya.';
+      if(['text_unavailable','unsupported','module_unavailable','error','not_available','empty'].includes(cv.state))return'Review CV asli, verifikasi persyaratan Screening HR, lalu tetapkan keputusan screening.';
       return'Verifikasi hasil Screening HR dan tetapkan keputusan untuk tahap berikutnya.';
     }
     if(/psiko/.test(stage))return'Tinjau hasil psikotes yang tersimpan dan tetapkan keputusan workflow sesuai hasil yang telah diverifikasi.';
@@ -351,10 +384,19 @@
   }
 
   function currentAttention(model){
-    const cv=model?.cvExtraction||{};
+    const cv=model?.cvExtraction||{},v=model?.cvValidation||null;
     const screening=model?.screening;
+    if(v&&v.gate!=='allow'){
+      if(v.gate==='system_error')return'Validasi CV mengalami error sistem; kandidat tidak boleh dirugikan karena kendala sistem.';
+      if(v.label==='NAMA PERLU KONFIRMASI')return'Nama pada CV mirip tetapi tidak identik dengan nama form; verifikasi HR diperlukan.';
+      if(v.label==='IDENTITAS TERINDIKASI BERBEDA')return'Identitas pada CV terindikasi berbeda dari data lamaran; klarifikasi diperlukan sebelum keputusan.';
+      if(v.label==='CV SCAN / TEKS TIDAK TERBACA')return'CV berupa scan/gambar; identitas dan isi CV perlu diverifikasi manual.';
+      if(v.label==='FORMAT CV PERLU REVIEW')return'Dokumen belum dapat dipastikan sebagai CV yang valid; review manual diperlukan.';
+      if(v.label==='CV BELUM TERSEDIA')return'CV kandidat belum tersedia untuk diverifikasi.';
+      return clean(v.recommendation)||'CV memerlukan review HR sebelum keputusan.';
+    }
     if(cv.state==='text_unavailable')return'Isi CV belum dapat dibaca otomatis; verifikasi manual diperlukan.';
-    if(cv.state==='error')return'Terdapat error sistem saat membaca CV; jangan gunakan error tersebut sebagai dasar keputusan kandidat.';
+    if(cv.state==='error')return'Terdapat kendala saat membaca CV; jangan gunakan kegagalan pemrosesan sebagai dasar keputusan kandidat.';
     if(cv.state==='unsupported')return'Format CV memerlukan review manual.';
     if(cv.state==='module_unavailable')return'Modul pembacaan CV tidak tersedia saat laporan dibuat; verifikasi file asli secara manual.';
     if(cv.state==='not_available')return'CV belum tersedia untuk diverifikasi.';
@@ -492,9 +534,22 @@
     ctx.doc.setFillColor(...tone);ctx.doc.rect(PAGE.left,ctx.y,2.2,h,'F');
     setFont(ctx,8.2,'bold',tone);ctx.doc.text(titleLines,PAGE.left+5,ctx.y+2.4,{baseline:'top'});
     setFont(ctx,8.15,'normal',SLATE);ctx.doc.text(bodyLines,PAGE.left+5,ctx.y+2.8+titleLines.length*3.7,{baseline:'top'});
-    ctx.y+=h+2.2;
+    ctx.y+=h+1.4;
 
-    if(!['available','success','ok'].includes(String(x.state||'').toLowerCase()))return;
+    const validation=ctx.model?.cvValidation||null;
+    if(validation){
+      const identity=cvValidationIdentityText(validation);
+      if(identity){
+        const lines=wrap(ctx,identity,CONTENT_W-4,7.25,'normal');
+        const metaH=Math.max(4.8,lines.length*3.35+1.5);
+        ensure(ctx,metaH);
+        setFont(ctx,7.25,'normal',MUTED);ctx.doc.text(lines,PAGE.left+2,ctx.y+0.8,{baseline:'top'});
+        ctx.y+=metaH;
+      }
+    }
+    ctx.y+=0.8;
+
+    if(!['available','success','ok','extracted'].includes(String(x.state||'').toLowerCase()))return;
     const sec=x.sections||{};
     const groups=[['Pendidikan',sec.education],['Pengalaman Kerja',sec.experience],['Keahlian / Kompetensi',sec.skills],['Sertifikasi / Pelatihan',sec.certifications],['Bahasa',sec.languages]].filter(([,items])=>arr(items).length);
     if(groups.length){
@@ -733,12 +788,28 @@
     return `Laporan_Kandidat_${safeName(model?.candidate?.candidate_name)}_${safeName(model?.application?.application_id)}.pdf`;
   }
 
+  async function ensureCvValidation(model,appId){
+    if(!model)return model;
+    const id=appId||model?.application?.application_id||null;
+    if(!id)return model;
+    if(model.cvValidation?.applicationId===id)return model;
+    const validator=window.CandidateCvValidationGateV1?.validate||window.validateCandidateCvV1;
+    if(typeof validator!=='function')return model;
+    try{model.cvValidation=await validator(id);}
+    catch(error){
+      model.cvValidation={applicationId:id,gate:'system_error',label:'ERROR SISTEM CV',tone:'red',candidateAction:'none',recommendation:'Validasi CV tidak dapat dijalankan. Verifikasi file asli secara manual; jangan gunakan error sistem sebagai dasar keputusan kandidat.',cvReason:error?.message||String(error)};
+    }
+    return model;
+  }
+
   async function resolveModel(appId){
     const state=window.CandidateDossierV1?.state;
-    if(!appId&&state?.lastModel)return state.lastModel;
-    if(appId&&state?.lastModel?.application?.application_id===appId)return state.lastModel;
-    if(typeof window.collectCandidateDossierDataV1==='function')return await window.collectCandidateDossierDataV1(appId);
-    throw new Error('DOSSIER_COLLECTOR_NOT_AVAILABLE');
+    let model=null;
+    if(!appId&&state?.lastModel)model=state.lastModel;
+    else if(appId&&state?.lastModel?.application?.application_id===appId)model=state.lastModel;
+    else if(typeof window.collectCandidateDossierDataV1==='function')model=await window.collectCandidateDossierDataV1(appId);
+    else throw new Error('DOSSIER_COLLECTOR_NOT_AVAILABLE');
+    return await ensureCvValidation(model,appId);
   }
 
   async function downloadCandidateDossierPdf(appId){
@@ -749,7 +820,7 @@
       toast('Laporan Kandidat PDF berhasil dibuat.','success');
       return doc;
     }catch(error){
-      console.error('[Laporan Kandidat PDF V1.6] download failed',error);
+      console.error('[Laporan Kandidat PDF V1.6.1] download failed',error);
       const message=error?.message==='JSPDF_NOT_AVAILABLE'?'Library jsPDF tidak tersedia pada halaman ini.':(error?.message||'PDF gagal dibuat.');
       toast('Laporan Kandidat PDF gagal dibuat: '+message,'danger');
       return null;
@@ -757,7 +828,8 @@
   }
 
   async function candidateDossierPdfBlob(modelOrAppId){
-    const model=typeof modelOrAppId==='object'&&modelOrAppId?.application?modelOrAppId:await resolveModel(modelOrAppId);
+    let model=typeof modelOrAppId==='object'&&modelOrAppId?.application?modelOrAppId:await resolveModel(modelOrAppId);
+    model=await ensureCvValidation(model,model?.application?.application_id||modelOrAppId);
     const doc=buildCandidateDossierPdf(model);
     return {blob:doc.output('blob'),filename:filenameFor(model),doc,model};
   }
@@ -777,7 +849,7 @@
     const previewRoot=root.querySelector('#candidateDossierPreviewV1');
     const info=previewRoot?.previousElementSibling;
     if(info && /(Fase PDF|Fase Laporan|Fase Paket Dokumen|Fase Paket)/i.test(info.textContent||'')){
-      info.innerHTML='<b>Laporan PDF V1.6:</b> clean-grid Executive Recruitment Assessment Report. Paket Dokumen tetap menggunakan PDF dan model canonical yang sama.';
+      info.innerHTML='<b>Laporan PDF V1.6.1:</b> clean-grid Executive Recruitment Assessment Report. Paket Dokumen tetap menggunakan PDF dan model canonical yang sama.';
     }
   }
 
@@ -804,5 +876,5 @@
 
   installOpenHook();
   document.addEventListener('DOMContentLoaded',()=>setTimeout(installOpenHook,1800));
-  console.log('%cLaporan Kandidat PDF V1.6 active','color:#2563eb;font-weight:bold');
+  console.log('%cLaporan Kandidat PDF V1.6.1 active','color:#2563eb;font-weight:bold');
 })();

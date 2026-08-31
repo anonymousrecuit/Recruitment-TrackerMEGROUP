@@ -16,7 +16,7 @@
   if(window.__ATS_CV_VALIDATION_GATE_V1_ACTIVE)return;
   window.__ATS_CV_VALIDATION_GATE_V1_ACTIVE=true;
 
-  const VERSION='1.1.0';
+  const VERSION='1.1.1';
   const cache=new Map();
 
   const esc=v=>typeof window.atsEsc==='function'?window.atsEsc(v):String(v??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[ch]));
@@ -332,6 +332,72 @@
     wrapped.__cvValidationGateV11Wrapped=true;wrapped.__cvValidationGateV11Original=current;window.viewCandidateDetail=wrapped;
   }
 
+  async function augmentDossierModelWithCvValidation(model,appId){
+    if(!model)return model;
+    const id=appId||model?.application?.application_id||null;
+    if(!id)return model;
+    try{model.cvValidation=await validate(id);}catch(_){/* validate already returns fail-safe result */}
+    return model;
+  }
+
+  function dossierValidationTone(result){
+    if(result?.tone==='emerald')return'border-emerald-200 bg-emerald-50 text-emerald-900';
+    if(result?.tone==='red')return'border-red-200 bg-red-50 text-red-900';
+    return'border-amber-200 bg-amber-50 text-amber-900';
+  }
+
+  function decorateDossierCvValidation(model){
+    const result=model?.cvValidation;if(!result)return;
+    const root=document.getElementById('candidateDossierPreviewV1');if(!root)return;
+    root.querySelector('#candidateDossierCvValidationV111')?.remove();
+    const sections=[...root.querySelectorAll('section')];
+    const target=sections.find(s=>/Informasi dari CV/i.test(s.querySelector('h4')?.textContent||''));
+    const body=target?.children?.[1];if(!body)return;
+    const identity=[
+      result.candidateName?`Nama form: ${result.candidateName}`:null,
+      result.cvName?`Nama CV: ${result.cvName}`:null,
+      Number.isFinite(Number(result.nameScore))?`Kecocokan: ${Math.round(Number(result.nameScore)*100)}%`:null
+    ].filter(Boolean).join(' · ');
+    const box=document.createElement('div');
+    box.id='candidateDossierCvValidationV111';
+    box.className=`mb-4 rounded-xl border p-4 text-sm ${dossierValidationTone(result)}`;
+    box.innerHTML=`<div class="text-[10px] uppercase tracking-wide opacity-70 font-bold">CV Validation Gate</div><div class="font-bold mt-1">${esc(result.label||'PERLU REVIEW')}</div>${identity?`<div class="text-xs mt-1">${esc(identity)}</div>`:''}<div class="text-xs mt-2">${esc(result.recommendation||'Verifikasi CV sebelum keputusan Screening.')}</div>`;
+    body.insertBefore(box,body.firstChild);
+  }
+
+  function installDossierValidationBridge(){
+    if(window.__ATS_DOSSIER_CV_VALIDATION_BRIDGE_V111_ACTIVE)return true;
+    const currentOpen=window.openCandidateDossierV1;
+    if(typeof currentOpen!=='function')return false;
+
+    if(typeof window.collectCandidateDossierDataV1==='function'&&!window.collectCandidateDossierDataV1.__cvValidationBridgeV111Wrapped){
+      const currentCollect=window.collectCandidateDossierDataV1;
+      const wrappedCollect=async function(appId,...args){
+        const model=await currentCollect.call(this,appId,...args);
+        return await augmentDossierModelWithCvValidation(model,appId);
+      };
+      wrappedCollect.__cvValidationBridgeV111Wrapped=true;
+      wrappedCollect.__cvValidationBridgeV111Original=currentCollect;
+      window.collectCandidateDossierDataV1=wrappedCollect;
+      if(window.CandidateDossierV1?.collect===currentCollect)window.CandidateDossierV1.collect=wrappedCollect;
+    }
+
+    const wrappedOpen=async function(appId,...args){
+      const output=await currentOpen.call(this,appId,...args);
+      const state=window.CandidateDossierV1?.state;
+      if(state?.lastModel&&(!appId||state.lastModel?.application?.application_id===appId)){
+        await augmentDossierModelWithCvValidation(state.lastModel,appId||state.lastAppId);
+        decorateDossierCvValidation(state.lastModel);
+      }
+      return output;
+    };
+    wrappedOpen.__cvValidationBridgeV111Wrapped=true;
+    wrappedOpen.__cvValidationBridgeV111Original=currentOpen;
+    window.openCandidateDossierV1=wrappedOpen;
+    window.__ATS_DOSSIER_CV_VALIDATION_BRIDGE_V111_ACTIVE=true;
+    return true;
+  }
+
   Object.assign(window,{
     CandidateCvValidationGateV1:{version:VERSION,validate,inject:injectCard,cache},
     validateCandidateCvV1:validate,
@@ -342,8 +408,8 @@
     openCvValidationGateV1:openCv
   });
 
-  installDetailHook();installScreeningHooks();
-  document.addEventListener('DOMContentLoaded',()=>setTimeout(()=>{installDetailHook();installScreeningHooks();},2100));
-  setTimeout(()=>{installDetailHook();installScreeningHooks();},3500);
-  console.log('%cCandidate CV Validation Gate V1.1 active','color:#b45309;font-weight:bold');
+  installDetailHook();installScreeningHooks();installDossierValidationBridge();
+  document.addEventListener('DOMContentLoaded',()=>setTimeout(()=>{installDetailHook();installScreeningHooks();installDossierValidationBridge();},2600));
+  setTimeout(()=>{installDetailHook();installScreeningHooks();installDossierValidationBridge();},4200);
+  console.log('%cCandidate CV Validation Gate V1.1.1 active','color:#b45309;font-weight:bold');
 })();
