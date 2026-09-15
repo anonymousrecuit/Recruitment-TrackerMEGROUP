@@ -305,7 +305,420 @@
   async function savePsychReview(appId,decision){const notes=document.getElementById('v2PsychNotes')?.value?.trim()||null;const {error}=await sb.rpc('review_psychotest_result',{p_application_id:appId,p_decision:decision,p_hr_notes:notes});if(error)return showToast('Gagal simpan review: '+error.message,'danger');closeModal();await loadPsych(true);if(currentPage==='psychotests')renderPsych(false);injectPsychCard(appId);showToast('Keputusan psikotes: '+decision,'success');}
   async function advanceToInterviewHr(appId){await transitionStage(appId,'Interview HR');}
 
-  function buildPsychPdf(summary,appId){if(!window.jspdf?.jsPDF)return null;const app=appById(appId),c=candById(app?.candidate_id),p=posById(app?.position_id),co=coById(app?.company_id),sess=summary.session||{};const {jsPDF}=window.jspdf,doc=new jsPDF();let y=16;const line=(t,s=9,b=false)=>{doc.setFontSize(s);doc.setFont('helvetica',b?'bold':'normal');for(const z of doc.splitTextToSize(String(t??'—'),180)){if(y>282){doc.addPage();y=16;}doc.text(z,15,y);y+=5;}y+=1;};line('LAPORAN HASIL PSIKOTES',15,true);line(`${c?.candidate_name||'-'} · ${p?.position_name||'-'} · ${co?.brand||co?.company_name||'-'}`,10,true);line(`Application: ${appId} · Attempt: ${sess.attempt_no||1} · Selesai: ${fmt(sess.completed_at)}`);line(`Rekomendasi SiPsiko: ${sess.engine_recommendation||'—'} · Keputusan HR: ${sess.workflow_decision||'—'}`);line('HASIL PER TES',11,true);(summary.results||[]).filter(r=>r.test_code!=='OVERALL').forEach(r=>{line(`${testLabel(r.test_code)}: ${resultValue(r)}`,9,true);if(r.interpretation)line(r.interpretation,8);});const overall=(summary.results||[]).find(r=>r.test_code==='OVERALL');if(overall?.interpretation){line('INTERPRETASI KESELURUHAN',11,true);line(overall.interpretation);}if(sess.hr_notes){line('CATATAN HR',11,true);line(sess.hr_notes);}line('Keputusan workflow recruitment ditetapkan HR dan dipisahkan dari rekomendasi engine SiPsiko.',8);return doc;}
+  function buildPsychPdf(summary,appId){
+  if(!window.jspdf?.jsPDF)return null;
+
+  const app=appById(appId);
+  const c=candById(app?.candidate_id);
+  const p=posById(app?.position_id);
+  const co=coById(app?.company_id);
+  const sess=summary.session||{};
+  const {jsPDF}=window.jspdf;
+
+  const doc=new jsPDF({
+    orientation:'portrait',
+    unit:'mm',
+    format:'a4'
+  });
+
+  const W=210;
+  const H=297;
+  const M=14;
+  const CW=W-(M*2);
+
+  let y=16;
+  let pageNo=1;
+
+  const clean=(v)=>{
+    const raw=String(v??'');
+    if(!raw)return '';
+
+    try{
+      const d=new DOMParser().parseFromString(raw,'text/html');
+      return String(d.body?.textContent||raw)
+        .replace(/\s+/g,' ')
+        .trim();
+    }catch(_){
+      return raw
+        .replace(/<br\s*\/?>/gi,' ')
+        .replace(/<[^>]+>/g,' ')
+        .replace(/\s+/g,' ')
+        .trim();
+    }
+  };
+
+  const pageFooter=()=>{
+    doc.setDrawColor(226,232,240);
+    doc.line(M,286,W-M,286);
+
+    doc.setFont('helvetica','normal');
+    doc.setFontSize(7);
+    doc.setTextColor(100,116,139);
+
+    doc.text(
+      `Internal HR · ${appId}`,
+      M,
+      291
+    );
+
+    doc.text(
+      `Halaman ${pageNo}`,
+      W-M,
+      291,
+      {align:'right'}
+    );
+  };
+
+  const newPage=()=>{
+    pageFooter();
+    doc.addPage();
+    pageNo++;
+    y=16;
+  };
+
+  const ensure=(need=12)=>{
+    if(y+need>280)newPage();
+  };
+
+  const text=(value,{
+    size=9,
+    bold=false,
+    color=[15,23,42],
+    x=M,
+    width=CW,
+    lineHeight=4.2,
+    gap=2
+  }={})=>{
+    const txt=clean(value)||'—';
+
+    doc.setFont(
+      'helvetica',
+      bold?'bold':'normal'
+    );
+
+    doc.setFontSize(size);
+    doc.setTextColor(...color);
+
+    const lines=
+      doc.splitTextToSize(txt,width);
+
+    const need=
+      Math.max(1,lines.length)*lineHeight+gap;
+
+    ensure(need);
+
+    lines.forEach(line=>{
+      doc.text(line,x,y);
+      y+=lineHeight;
+    });
+
+    y+=gap;
+  };
+
+  const sectionTitle=(title)=>{
+    ensure(12);
+
+    y+=2;
+
+    doc.setFont('helvetica','bold');
+    doc.setFontSize(11);
+    doc.setTextColor(15,23,42);
+    doc.text(title,M,y);
+
+    doc.setDrawColor(37,99,235);
+    doc.setLineWidth(.45);
+    doc.line(M+45,y-1,W-M,y-1);
+
+    y+=6;
+  };
+
+  const infoBox=(label,value,x,boxY,w)=>{
+    doc.setFillColor(248,250,252);
+    doc.setDrawColor(226,232,240);
+    doc.roundedRect(
+      x,
+      boxY,
+      w,
+      16,
+      2,
+      2,
+      'FD'
+    );
+
+    doc.setFont('helvetica','normal');
+    doc.setFontSize(6.8);
+    doc.setTextColor(100,116,139);
+    doc.text(
+      String(label).toUpperCase(),
+      x+4,
+      boxY+5
+    );
+
+    doc.setFont('helvetica','bold');
+    doc.setFontSize(9);
+    doc.setTextColor(15,23,42);
+
+    const val=
+      doc.splitTextToSize(
+        clean(value)||'—',
+        w-8
+      );
+
+    doc.text(
+      val.slice(0,2),
+      x+4,
+      boxY+10
+    );
+  };
+
+  const resultBlock=(r)=>{
+    const interpretation=
+      clean(r?.interpretation);
+
+    const label=
+      testLabel(r?.test_code);
+
+    const result=
+      resultValue(r);
+
+    ensure(18);
+
+    doc.setFillColor(248,250,252);
+    doc.setDrawColor(226,232,240);
+
+    const top=y;
+
+    doc.roundedRect(
+      M,
+      top,
+      CW,
+      12,
+      2,
+      2,
+      'FD'
+    );
+
+    doc.setFont('helvetica','bold');
+    doc.setFontSize(9.5);
+    doc.setTextColor(15,23,42);
+    doc.text(
+      clean(label),
+      M+4,
+      top+5
+    );
+
+    doc.setFontSize(9);
+    doc.setTextColor(37,99,235);
+    doc.text(
+      clean(result),
+      W-M-4,
+      top+5,
+      {align:'right'}
+    );
+
+    y=top+16;
+
+    if(interpretation){
+      text(interpretation,{
+        size:8.4,
+        color:[51,65,85],
+        lineHeight:4,
+        gap:4
+      });
+    }
+  };
+
+  /* HEADER */
+  doc.setFillColor(15,23,42);
+  doc.roundedRect(
+    M,
+    y,
+    CW,
+    28,
+    3,
+    3,
+    'F'
+  );
+
+  doc.setFont('helvetica','normal');
+  doc.setFontSize(7);
+  doc.setTextColor(203,213,225);
+  doc.text(
+    'RECRUITMENT ASSESSMENT REPORT',
+    M+6,
+    y+7
+  );
+
+  doc.setFont('helvetica','bold');
+  doc.setFontSize(16);
+  doc.setTextColor(255,255,255);
+  doc.text(
+    'LAPORAN HASIL PSIKOTES',
+    M+6,
+    y+15
+  );
+
+  doc.setFont('helvetica','normal');
+  doc.setFontSize(8.5);
+  doc.setTextColor(203,213,225);
+  doc.text(
+    `${clean(c?.candidate_name||'-')} · ${clean(p?.position_name||'-')} · ${clean(co?.brand||co?.company_name||'-')}`,
+    M+6,
+    y+22
+  );
+
+  y+=34;
+
+  /* SUMMARY */
+  ensure(20);
+
+  const bw=(CW-6)/2;
+
+  infoBox(
+    'Application',
+    appId,
+    M,
+    y,
+    bw
+  );
+
+  infoBox(
+    'Attempt / Selesai',
+    `Attempt ${sess.attempt_no||1} · ${fmt(sess.completed_at)}`,
+    M+bw+6,
+    y,
+    bw
+  );
+
+  y+=20;
+
+  infoBox(
+    'Rekomendasi SiPsiko',
+    sess.engine_recommendation||'—',
+    M,
+    y,
+    bw
+  );
+
+  infoBox(
+    'Keputusan HR',
+    sess.workflow_decision||'—',
+    M+bw+6,
+    y,
+    bw
+  );
+
+  y+=22;
+
+  /* TEST RESULTS */
+  sectionTitle('Hasil Per Tes');
+
+  const rows=
+    (summary.results||[])
+      .filter(r=>r.test_code!=='OVERALL');
+
+  rows.forEach(resultBlock);
+
+  /* OVERALL */
+  const overall=
+    (summary.results||[])
+      .find(r=>r.test_code==='OVERALL');
+
+  if(overall?.interpretation){
+    sectionTitle(
+      'Interpretasi Keseluruhan'
+    );
+
+    doc.setFillColor(239,246,255);
+    doc.setDrawColor(191,219,254);
+
+    const overallText=
+      clean(overall.interpretation);
+
+    const lines=
+      doc.splitTextToSize(
+        overallText,
+        CW-10
+      );
+
+    const h=
+      Math.max(
+        18,
+        lines.length*4+10
+      );
+
+    ensure(h+4);
+
+    doc.roundedRect(
+      M,
+      y,
+      CW,
+      h,
+      2,
+      2,
+      'FD'
+    );
+
+    doc.setFont('helvetica','normal');
+    doc.setFontSize(8.5);
+    doc.setTextColor(30,64,175);
+
+    let ty=y+6;
+
+    lines.forEach(line=>{
+      doc.text(line,M+5,ty);
+      ty+=4;
+    });
+
+    y+=h+5;
+  }
+
+  /* HR NOTES */
+  if(sess.hr_notes){
+    sectionTitle('Catatan HR');
+
+    text(sess.hr_notes,{
+      size:8.5,
+      color:[51,65,85],
+      gap:4
+    });
+  }
+
+  /* DISCLAIMER */
+  ensure(18);
+
+  y+=2;
+
+  doc.setFillColor(255,251,235);
+  doc.setDrawColor(253,230,138);
+
+  doc.roundedRect(
+    M,
+    y,
+    CW,
+    14,
+    2,
+    2,
+    'FD'
+  );
+
+  doc.setFont('helvetica','normal');
+  doc.setFontSize(7.5);
+  doc.setTextColor(146,64,14);
+
+  const note=
+    'Rekomendasi SiPsiko merupakan bahan pertimbangan. Keputusan workflow recruitment tetap ditetapkan HR berdasarkan seluruh evidence yang tersedia.';
+
+  doc.text(
+    doc.splitTextToSize(note,CW-10),
+    M+5,
+    y+5
+  );
+
+  pageFooter();
+
+  return doc;
+}
   async function downloadPsychPdf(appId){try{const s=await psychSummary(appId);const doc=buildPsychPdf(s,appId);if(!doc)return showToast('jsPDF belum termuat','danger');doc.save(`Hasil_Psikotes_${safeFile(candById(appById(appId)?.candidate_id)?.candidate_name)}.pdf`);}catch(e){showToast('Gagal membuat PDF: '+e.message,'danger');}}
   async function savePsychPdf(appId){try{const s=await psychSummary(appId),app=appById(appId),c=candById(app?.candidate_id),sess=s.session||{},doc=buildPsychPdf(s,appId);if(!doc)throw new Error('jsPDF belum termuat');const stamp=new Date().toISOString().replace(/[:.]/g,'-'),name=`hasil-psikotes-${safeFile(c?.candidate_name)}-${stamp}.pdf`,path=`${safePath(app.company_id)}/${safePath(appId)}/${safePath(sess.session_id)}/${name}`,blob=doc.output('blob');const {error:e1}=await sb.storage.from('psychotest-results').upload(path,blob,{contentType:'application/pdf',upsert:false});if(e1)throw e1;const {error:e2}=await sb.rpc('register_psychotest_document',{p_session_id:sess.session_id,p_storage_path:path,p_file_name:name,p_mime_type:'application/pdf'});if(e2)throw e2;injectPsychCard(appId);showToast('PDF tersimpan di Storage','success');}catch(e){showToast('Gagal simpan PDF: '+e.message,'danger');}}
   async function openPsychDoc(path){try{const {data,error}=await sb.storage.from('psychotest-results').createSignedUrl(path,120);if(error)throw error;window.open(data.signedUrl,'_blank','noopener');}catch(e){showToast('Gagal buka dokumen: '+e.message,'danger');}}
@@ -960,7 +1373,250 @@
   }
 
   function printCss22(){return `
-    @page{size:A4;margin:14mm}*{box-sizing:border-box}body{font-family:Arial,Helvetica,sans-serif;color:#0f172a;margin:0;font-size:11px;line-height:1.45}.page{max-width:900px;margin:0 auto}.head{background:#0f172a;color:white;padding:22px;border-radius:12px}.eyebrow{text-transform:uppercase;letter-spacing:.18em;font-size:9px;color:#cbd5e1}.title{font-size:24px;font-weight:800;margin:5px 0}.sub{color:#cbd5e1}.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.card{border:1px solid #e2e8f0;border-radius:10px;padding:12px;margin-top:10px}.soft{background:#f8fafc}.section{margin-top:14px;border:1px solid #e2e8f0;border-radius:12px;overflow:hidden;page-break-inside:avoid}.section-head{padding:14px;background:#f8fafc;border-bottom:1px solid #e2e8f0;display:flex;justify-content:space-between}.score{font-size:26px;font-weight:800}.analysis{background:#0f172a;color:white;border-radius:9px;padding:12px;margin:12px}.cols{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:0 12px 12px}.box{border:1px solid #e2e8f0;border-radius:9px;padding:10px}.green{background:#ecfdf5}.amber{background:#fffbeb}.red{background:#fef2f2}.blue{background:#eff6ff}.summary{background:#eef2ff;border:1px solid #c7d2fe;border-radius:10px;padding:12px;margin-top:12px}table{width:100%;border-collapse:collapse}th,td{border:1px solid #e2e8f0;padding:6px;text-align:left}th{background:#f8fafc}.small{font-size:9px;color:#64748b}.badge{display:inline-block;border:1px solid #cbd5e1;border-radius:999px;padding:4px 8px;font-weight:700}.footer{margin-top:16px;color:#64748b;font-size:9px}@media print{button{display:none!important}.section{break-inside:avoid}}`}
+  @page{
+    size:A4 portrait;
+    margin:10mm;
+  }
+
+  *{
+    box-sizing:border-box;
+  }
+
+  html,
+  body{
+    margin:0;
+    padding:0;
+  }
+
+  body{
+    font-family:Arial,Helvetica,sans-serif;
+    color:#0f172a;
+    font-size:9.5px;
+    line-height:1.32;
+    -webkit-print-color-adjust:exact;
+    print-color-adjust:exact;
+  }
+
+  .page{
+    width:100%;
+    max-width:190mm;
+    margin:0 auto;
+  }
+
+  .head{
+    background:#0f172a;
+    color:#fff;
+    padding:14px 16px;
+    border-radius:8px;
+  }
+
+  .eyebrow{
+    text-transform:uppercase;
+    letter-spacing:.16em;
+    font-size:7.5px;
+    color:#cbd5e1;
+  }
+
+  .title{
+    font-size:20px;
+    line-height:1.1;
+    font-weight:800;
+    margin:3px 0;
+  }
+
+  .sub{
+    color:#cbd5e1;
+    font-size:8.5px;
+  }
+
+  .grid{
+    display:grid;
+    grid-template-columns:repeat(3,1fr);
+    gap:5px;
+  }
+
+  .card{
+    border:1px solid #e2e8f0;
+    border-radius:7px;
+    padding:7px;
+    margin-top:6px;
+  }
+
+  .soft{
+    background:#f8fafc;
+  }
+
+  .section{
+    margin-top:8px;
+    border:1px solid #e2e8f0;
+    border-radius:8px;
+    overflow:visible;
+
+    break-inside:auto;
+    page-break-inside:auto;
+  }
+
+  .section-head{
+    padding:8px 10px;
+    background:#f8fafc;
+    border-bottom:1px solid #e2e8f0;
+
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:8px;
+
+    break-inside:avoid;
+    page-break-inside:avoid;
+  }
+
+  .score{
+    font-size:18px;
+    font-weight:800;
+  }
+
+  .analysis{
+    background:#0f172a;
+    color:white;
+    border-radius:6px;
+    padding:8px 9px;
+    margin:7px;
+
+    break-inside:avoid;
+    page-break-inside:avoid;
+  }
+
+  .cols{
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:5px;
+    padding:0 7px 7px;
+  }
+
+  .box{
+    border:1px solid #e2e8f0;
+    border-radius:6px;
+    padding:7px;
+
+    break-inside:avoid;
+    page-break-inside:avoid;
+  }
+
+  .box ul{
+    margin:4px 0 0;
+    padding-left:15px;
+  }
+
+  .box li{
+    margin:1px 0;
+  }
+
+  .green{
+    background:#ecfdf5;
+  }
+
+  .amber{
+    background:#fffbeb;
+  }
+
+  .red{
+    background:#fef2f2;
+  }
+
+  .blue{
+    background:#eff6ff;
+  }
+
+  .summary{
+    background:#eef2ff;
+    border:1px solid #c7d2fe;
+    border-radius:7px;
+    padding:8px 9px;
+    margin-top:7px;
+
+    break-inside:avoid;
+    page-break-inside:avoid;
+  }
+
+  table{
+    width:100%;
+    border-collapse:collapse;
+    table-layout:fixed;
+    font-size:8.5px;
+  }
+
+  th,
+  td{
+    border:1px solid #e2e8f0;
+    padding:4px 5px;
+    text-align:left;
+    vertical-align:top;
+    word-break:break-word;
+  }
+
+  th{
+    background:#f8fafc;
+  }
+
+  thead{
+    display:table-header-group;
+  }
+
+  tr{
+    break-inside:avoid;
+    page-break-inside:avoid;
+  }
+
+  .small{
+    font-size:7.5px;
+    color:#64748b;
+  }
+
+  .badge{
+    display:inline-block;
+    border:1px solid #cbd5e1;
+    border-radius:999px;
+    padding:2px 6px;
+    font-size:8px;
+    font-weight:700;
+  }
+
+  .footer{
+    margin-top:7px;
+    color:#64748b;
+    font-size:7.5px;
+
+    break-inside:avoid;
+    page-break-inside:avoid;
+  }
+
+  @media print{
+
+    button{
+      display:none!important;
+    }
+
+    .page{
+      max-width:none;
+      width:100%;
+    }
+
+    .section{
+      break-inside:auto!important;
+      page-break-inside:auto!important;
+    }
+
+    .section-head,
+    .analysis,
+    .box,
+    .summary,
+    tr,
+    .footer{
+      break-inside:avoid!important;
+      page-break-inside:avoid!important;
+    }
+  }
+`}
   function printStage22(r,c){
     if(!r)return'';const a=analysis22(r,c),items=Array.isArray(r.detail_json)?r.detail_json:[],first=Array.isArray(r.first_impression)?r.first_impression:[];
     return `<div class="section"><div class="section-head"><div><b>${e22(r.interview_type||'Interview')}</b><div class="small">${e22(r.interviewer||'-')} | ${e22(fmt22(r.assessed_at||r.created_at))}</div></div><div><span class="score">${a.score.toFixed(1)}</span> /100 <span class="badge">${e22(a.decision)}</span></div></div><div class="analysis"><b>Ringkasan Analisis</b><div style="margin-top:6px">${e22(a.narrative)}</div></div><div class="cols"><div class="box green"><b>Kekuatan</b><ul>${a.strengths.map(x=>`<li>${e22(x)}</li>`).join('')}</ul></div><div class="box amber"><b>Gap / Pendalaman</b><ul>${a.gaps.map(x=>`<li>${e22(x)}</li>`).join('')}</ul></div><div class="box"><b>Verifikasi CV / Profil</b><div>${e22(a.cv)}</div></div><div class="box ${a.flags.length?'red':''}"><b>Red Flag - Risiko ${e22(a.risk)}</b><ul>${a.flags.length?a.flags.map(x=>`<li>${e22(x)}</li>`).join(''):'<li>Tidak ada red flag dicentang</li>'}</ul></div></div>${first.length?`<div class="card"><b>First Impression</b><table style="margin-top:6px"><tr><th>Aspek</th><th>Skor</th><th>Catatan</th></tr>${first.map(x=>`<tr><td>${e22(x.name||'-')}</td><td>${e22(x.score||0)}/4</td><td>${e22(x.note||'-')}</td></tr>`).join('')}</table></div>`:''}${items.length?`<div class="card"><b>Evidence Kompetensi</b><table style="margin-top:6px"><tr><th>Kompetensi</th><th>Skor</th><th>Evidence</th></tr>${items.map(x=>`<tr><td>${e22(x.competency_name||'-')}</td><td>${e22(x.score||0)}/4</td><td>${e22(x.evidence||'-')}</td></tr>`).join('')}</table></div>`:''}${a.notes?`<div class="card"><b>Kesimpulan Interviewer</b><div style="margin-top:5px">${e22(a.notes)}</div></div>`:''}${a.reviewedAt?`<div class="card blue"><b>Review Workflow</b><div style="margin-top:5px">Keputusan: ${e22(a.decision)}${a.reviewedBy?' | Reviewer: '+e22(a.reviewedBy):''}${a.reviewNotes?' | Catatan: '+e22(a.reviewNotes):''}</div></div>`:''}</div>`;
