@@ -18169,47 +18169,67 @@ Tim Rekrutmen {brand}`
 
     function populateGlobalFilters() {
       const sel = document.getElementById('globalCompanyFilter');
-      const prev = sel.value;
       const saved = sessionStorage.getItem('rt_global_company') || 'all';
       const access = getAccessCompanyIds();
-      let companies = DB.companies.filter(c => c.status === 'Aktif');
+
+      const allCompanies = Array.isArray(DB?.companies) ? DB.companies : [];
+      const allSources = Array.isArray(DB?.sources) ? DB.sources : [];
+
+      let companies = allCompanies.filter(c => c && c.status === 'Aktif');
       if (access) companies = companies.filter(c => access.includes(c.company_id));
 
-      sel.innerHTML = '';
-      if (!access || companies.length > 1) {
-        sel.innerHTML = '<option value="all">Semua Perusahaan</option>';
-      }
-      companies.forEach(c => {
-        sel.innerHTML += `<option value="${c.company_id}">${c.company_code} - ${c.brand}</option>`;
-      });
-      if (access && companies.length === 1) {
-        sel.value = companies[0].company_id;
-        sel.disabled = true;
-      } else {
-        sel.disabled = false;
-        const prefer = (prev && prev !== 'all' && [...sel.options].some(o => o.value === prev)) ? prev
-          : (saved && [...sel.options].some(o => o.value === saved) ? saved : 'all');
-        if ([...sel.options].some(o => o.value === prefer)) sel.value = prefer;
-        else if (sel.options.length) sel.selectedIndex = 0;
+      if (sel) {
+        const prev = sel.value;
+
+        sel.innerHTML = '';
+        if (!access || companies.length > 1) {
+          sel.innerHTML = '<option value="all">Semua Perusahaan</option>';
+        }
+
+        companies.forEach(c => {
+          sel.innerHTML += `<option value="${c.company_id}">${c.company_code || ''} - ${c.brand || c.company_name || ''}</option>`;
+        });
+
+        if (access && companies.length === 1) {
+          sel.value = companies[0].company_id;
+          sel.disabled = true;
+        } else {
+          sel.disabled = false;
+          const prefer =
+            (prev && prev !== 'all' && [...sel.options].some(o => o.value === prev))
+              ? prev
+              : (saved && [...sel.options].some(o => o.value === saved) ? saved : 'all');
+
+          if ([...sel.options].some(o => o.value === prefer)) sel.value = prefer;
+          else if (sel.options.length) sel.selectedIndex = 0;
+        }
       }
 
-      // Pipeline filter
       const ps = document.getElementById('pipeCompanyFilter');
       if (ps) {
         const cur = ps.value;
         ps.innerHTML = '<option value="all">Semua Perusahaan</option>';
-        DB.companies.forEach(c => { ps.innerHTML += `<option value="${c.company_id}">${c.brand}</option>`; });
+        allCompanies.forEach(c => {
+          if (!c) return;
+          ps.innerHTML += `<option value="${c.company_id}">${c.brand || c.company_name || ''}</option>`;
+        });
         if ([...ps.options].some(o => o.value === cur)) ps.value = cur;
       }
 
-      // Candidate filters
       const stageSel = document.getElementById('candFilterStage');
       if (stageSel && stageSel.options.length <= 1) {
-        getStages().forEach(s => { stageSel.innerHTML += `<option value="${s}">${s}</option>`; });
+        const stages = typeof getStages === 'function' ? getStages() : [];
+        (Array.isArray(stages) ? stages : []).forEach(stage => {
+          stageSel.innerHTML += `<option value="${stage}">${stage}</option>`;
+        });
       }
+
       const srcSel = document.getElementById('candFilterSource');
       if (srcSel && srcSel.options.length <= 1) {
-        DB.sources.forEach(s => { srcSel.innerHTML += `<option value="${s.source_id}">${s.source_name}</option>`; });
+        allSources.forEach(source => {
+          if (!source) return;
+          srcSel.innerHTML += `<option value="${source.source_id}">${source.source_name || ''}</option>`;
+        });
       }
     }
 
@@ -18279,6 +18299,7 @@ Tim Rekrutmen {brand}`
 
     // ---- DASHBOARD ----
     function renderDashboard() {
+      const companyId = getFilteredCompanyId();
       let apps = scopeByCompany(DB.applications);
       let mps = scopeByCompany(DB.manpower);
       let reqs = scopeByCompany(DB.requisitions);
@@ -18399,7 +18420,7 @@ Tim Rekrutmen {brand}`
       const totalApps = apps.length || 1;
       const hiredCount = apps.filter(a => a.status === 'Diterima').length;
       document.getElementById('hiringRate').textContent = Math.round(hiredCount / totalApps * 100) + '%';
-      const offers = DB.offerings.filter(o => {
+      const offers = (Array.isArray(DB?.offerings) ? DB.offerings : []).filter(o => {
         const a = getApplication(o.application_id);
         return a && (!companyId || a.company_id === companyId);
       });
