@@ -15,7 +15,7 @@
   if(window.__ATS_CANDIDATE_DOSSIER_PDF_V1_ACTIVE) return;
   window.__ATS_CANDIDATE_DOSSIER_PDF_V1_ACTIVE=true;
 
-  const VERSION='1.6.1-pdf';
+  const VERSION='1.6.4-pdf';
   const PAGE={w:210,h:297,left:16,right:16,top:20,bottom:282};
   const CONTENT_W=PAGE.w-PAGE.left-PAGE.right;
   const NAVY=[15,23,42], SLATE=[71,85,105], MUTED=[100,116,139], LINE=[226,232,240], SOFT=[248,250,252], BLUE=[37,99,235];
@@ -375,7 +375,16 @@
       if(['text_unavailable','unsupported','module_unavailable','error','not_available','empty'].includes(cv.state))return'Review CV asli, verifikasi persyaratan Screening HR, lalu tetapkan keputusan screening.';
       return'Verifikasi hasil Screening HR dan tetapkan keputusan untuk tahap berikutnya.';
     }
-    if(/psiko/.test(stage))return'Tinjau hasil psikotes yang tersimpan dan tetapkan keputusan workflow sesuai hasil yang telah diverifikasi.';
+    if(/psiko/.test(stage)){
+      const p=model?.psych?.data||{};
+      const st=String(p.status||'').trim();
+      if(st==='Belum Dimulai')return `Kandidat memiliki akses Psikotes aktif${p.attemptNo?` (Attempt ${p.attemptNo})`:''} dan belum mulai mengerjakan. Pantau penyelesaian sebelum batas waktu akses.`;
+      if(st==='Dalam Proses')return `Kandidat sedang mengerjakan Psikotes${p.attemptNo?` pada Attempt ${p.attemptNo}`:''}. Tunggu sampai selesai sebelum melakukan review hasil.`;
+      if(st==='Kedaluwarsa')return'Akses Psikotes telah kedaluwarsa. Buat akses baru sesuai workflow sebelum kandidat melanjutkan pengerjaan.';
+      if(st==='Dibatalkan')return'Sesi Psikotes dibatalkan. Verifikasi alasan pembatalan dan buat akses baru bila proses akan dilanjutkan.';
+      if(st==='Selesai')return'Tinjau hasil psikotes yang tersimpan dan tetapkan keputusan workflow sesuai hasil yang telah diverifikasi.';
+      return'Periksa status sesi Psikotes terbaru sebelum melakukan tindakan workflow.';
+    }
     if(/interview hr|wawancara hr/.test(stage))return'Laksanakan atau review Wawancara HR berdasarkan evidence yang tersimpan sebelum memindahkan tahap.';
     if(/interview user|wawancara user/.test(stage))return'Laksanakan atau review Wawancara User, kemudian tetapkan keputusan workflow berdasarkan evidence yang tersimpan.';
     if(/offer|penawaran/.test(stage))return'Tinjau status penawaran dan tindak lanjuti keputusan kandidat sesuai data offering yang tersimpan.';
@@ -402,6 +411,13 @@
     if(cv.state==='not_available')return'CV belum tersedia untuk diverifikasi.';
     if(screening?.state==='error')return'Data Screening tidak dapat dimuat saat laporan dibuat.';
     if(screening?.state==='available'&&!present(screening.data?.reviewDecision))return'Keputusan HR pada Screening belum tersimpan.';
+    const psych=model?.psych;
+    if(/psiko/.test(clean(model?.application?.current_stage).toLowerCase())&&psych?.state==='available'){
+      const p=psych.data||{};
+      if(p.status==='Belum Dimulai')return `Psikotes Attempt ${p.attemptNo||1} belum dimulai${p.expiresAt?`; akses berlaku sampai ${fmtDate(p.expiresAt)}`:''}.`;
+      if(p.status==='Dalam Proses')return `Psikotes Attempt ${p.attemptNo||1} sedang dikerjakan dan belum memiliki hasil final.`;
+      if(p.status==='Kedaluwarsa')return `Psikotes Attempt ${p.attemptNo||1} telah kedaluwarsa dan belum menghasilkan hasil final.`;
+    }
     const concerns=arr(model?.synthesis?.concerns).filter(present);
     return concerns[0]?clean(concerns[0]):'Tidak ada catatan khusus tambahan pada evidence yang tersedia.';
   }
@@ -495,7 +511,15 @@
         {label:'Alasan Melamar',value:c.apply_reason,span:2}
       ]
     ];
-    rows.forEach((cells,rowIndex)=>{
+    const compactRows=rows.map(row=>{
+      const kept=row.filter(cell=>present(cell?.value));
+      if(!kept.length)return null;
+      if(kept.length===1)return [{...kept[0],span:3}];
+      if(kept.length===2)return [{...kept[0],span:1},{...kept[1],span:2}];
+      return kept.map(cell=>({...cell,span:1}));
+    }).filter(Boolean);
+
+    compactRows.forEach((cells,rowIndex)=>{
       let cursor=0;
       const metrics=cells.map(cell=>{
         const w=colW*cell.span;
@@ -536,17 +560,8 @@
     setFont(ctx,8.15,'normal',SLATE);ctx.doc.text(bodyLines,PAGE.left+5,ctx.y+2.8+titleLines.length*3.7,{baseline:'top'});
     ctx.y+=h+1.4;
 
-    const validation=ctx.model?.cvValidation||null;
-    if(validation){
-      const identity=cvValidationIdentityText(validation);
-      if(identity){
-        const lines=wrap(ctx,identity,CONTENT_W-4,7.25,'normal');
-        const metaH=Math.max(4.8,lines.length*3.35+1.5);
-        ensure(ctx,metaH);
-        setFont(ctx,7.25,'normal',MUTED);ctx.doc.text(lines,PAGE.left+2,ctx.y+0.8,{baseline:'top'});
-        ctx.y+=metaH;
-      }
-    }
+    // Identitas kandidat sudah tercantum di ringkasan cvSummary().
+    // Tidak dirender ulang agar Nama Form / Nama CV / Kecocokan tidak duplikat.
     ctx.y+=0.8;
 
     if(!['available','success','ok','extracted'].includes(String(x.state||'').toLowerCase()))return;
@@ -566,8 +581,8 @@
   function screeningAspect(text){
     const s=clean(text).toLowerCase();
     if(/\b(sma|smk|d1|d2|d3|d4|s1|s2|s3)\b|pendidikan|sarjana|diploma/.test(s))return'Pendidikan';
+    if(/usia|umur|berusia/.test(s))return'Usia';
     if(/pengalaman|\btahun\b/.test(s))return'Pengalaman';
-    if(/usia|umur/.test(s))return'Usia';
     if(/domisili|berdomisili|tinggal|lokasi/.test(s))return'Domisili';
     if(/excel|google sheets|ketenagakerjaan|alat tes|psikotes|rekrutmen|software|sistem|teknis/.test(s))return'Kompetensi Teknis';
     if(/teliti|kerahasiaan|komunikasi|mengelola data|kerja sama|disiplin|inisiatif/.test(s))return'Kompetensi Kerja';
@@ -627,17 +642,37 @@
     const block=ctx.model.psych;
     if(block?.state!=='available')return;
     const p=block.data||{};
-    sectionHeading(ctx,'Psikotes','Hanya menggunakan hasil dan interpretasi yang benar-benar tersimpan dari SiPsiko.',18);
+    sectionHeading(ctx,'Psikotes','Status attempt aktif dan hasil final dibedakan agar HR tidak mereview tes yang belum selesai.',18);
     const packageText=arr(p.package).map(x=>TEST_LABELS[x?.test_code]||x?.test_code).filter(Boolean).join(' · ');
+    const completed=String(p.status||'')==='Selesai';
     compactGrid(ctx,[
-      ['Status',p.status],['Paket Tes',packageText],['Rekomendasi Engine',humanResult(p.engineRecommendation)],
-      ['Keputusan HR',String(p.status||'')==='Selesai'?(p.workflowDecision?humanResult(p.workflowDecision):'Belum Ada'):null]
+      ['Attempt',p.attemptNo?`Attempt ${p.attemptNo}`:null],
+      ['Status',p.status],
+      ['Mulai',p.startedAt?fmtDate(p.startedAt):null],
+      ['Batas Akses',p.expiresAt?fmtDate(p.expiresAt):null],
+      ['Selesai',p.completedAt?fmtDate(p.completedAt):null],
+      ['Paket Tes',packageText],
+      ['Rekomendasi Engine',completed?humanResult(p.engineRecommendation):null],
+      ['Keputusan HR',completed?(p.workflowDecision?humanResult(p.workflowDecision):'Belum Ada'):null]
     ],2,{valueSize:7.6});
-    if(p.hrNotes&&String(p.status)==='Selesai')callout(ctx,'Catatan HR Psikotes',p.hrNotes,'info',{bodySize:7.3});
+    if(!completed){
+      const status=String(p.status||'').trim();
+      const body=status==='Belum Dimulai'
+        ?'Kandidat memiliki akses Psikotes aktif tetapi belum mulai mengerjakan. Belum ada hasil yang dapat direview.'
+        :status==='Dalam Proses'
+          ?'Kandidat sedang mengerjakan Psikotes. Hasil final baru dapat direview setelah status Selesai.'
+          :['Kedaluwarsa','Dibatalkan'].includes(status)
+            ?'Sesi ini belum menghasilkan hasil final. Gunakan workflow akses baru bila proses akan dilanjutkan.'
+            :'Belum tersedia hasil Psikotes final pada attempt aktif.';
+      callout(ctx,'Hasil Psikotes Belum Tersedia',body,status==='Kedaluwarsa'||status==='Dibatalkan'?'warn':'neutral',{bodySize:7.3});
+      return;
+    }
+    if(p.hrNotes)callout(ctx,'Catatan HR Psikotes',p.hrNotes,'info',{bodySize:7.3});
     const results=arr(p.results).filter(r=>r.code!=='OVERALL');
     if(results.length)table(ctx,[
       {label:'Tes',key:'test',width:42},{label:'Hasil',key:'value',width:34},{label:'Interpretasi Tersimpan',key:'interpretation',width:104}
     ],results.map(r=>({test:r.label||r.code||'Tes',value:r.value||'—',interpretation:r.interpretation||r.recommendation||'—'})),{fontSize:6.6});
+    else callout(ctx,'Hasil Psikotes Belum Tersedia','Status sesi Selesai, tetapi detail hasil per tes belum tersedia pada sumber laporan. Verifikasi sinkronisasi SiPsiko sebelum mengambil keputusan.','warn',{bodySize:7.3});
   }
 
   function interview(ctx,block,label){
@@ -695,13 +730,13 @@
   function timeline(ctx){
     const rows=arr(ctx.model.timeline);
     if(!rows.length)return;
-    const inlineDocs=rows.length<=3;
-    sectionHeading(ctx,'Riwayat Rekrutmen','',inlineDocs?14:16);
+    const inlineDocs=rows.length<=4;
+    sectionHeading(ctx,'Riwayat Rekrutmen','',inlineDocs?8:14);
     if(inlineDocs){
       rows.forEach(x=>{
         const date=fmtDate(x.date), event=clean(x.event||'Aktivitas');
         const meta=[x.actor?`Aktor: ${x.actor}`:null,x.notes?clean(x.notes):null].filter(Boolean).join(' · ');
-        const dateW=44;
+        const dateW=38;
         const eventLines=wrap(ctx,event,CONTENT_W-dateW-3,8.0,'bold');
         const metaLines=meta?wrap(ctx,meta,CONTENT_W-dateW-3,7.2,'normal'):[];
         const h=Math.max(7,eventLines.length*3.8+(metaLines.length?metaLines.length*3.4+1:0));
@@ -714,7 +749,7 @@
       });
       const m=ctx.model, docs=arr(m.attachments?.psychDocuments);
       const cvText=m.attachments?.cvAvailable?'CV tersedia; file asli disertakan terpisah':'CV belum tersedia';
-      const psychText=docs.length?`Psikotes: ${docs.length} dokumen tersimpan`:'Psikotes belum tersedia';
+      const psychText=docs.length?`Hasil Psikotes: ${docs.length} dokumen tersimpan`:'Hasil Psikotes belum tersedia';
       const docLines=wrap(ctx,`${cvText}   ·   ${psychText}`,CONTENT_W-38,7.8,'normal');
       const docH=Math.max(7.2,3.5+docLines.length*3.6);
       ensure(ctx,docH);
@@ -733,7 +768,7 @@
     if(ctx.__attachmentsInline)return;
     const m=ctx.model, docs=arr(m.attachments?.psychDocuments);
     const cvText=m.attachments?.cvAvailable?'CV tersedia; file asli disertakan terpisah':'CV belum tersedia';
-    const psychText=docs.length?`Psikotes: ${docs.length} dokumen tersimpan`:'Psikotes belum tersedia';
+    const psychText=docs.length?`Hasil Psikotes: ${docs.length} dokumen tersimpan`:'Hasil Psikotes belum tersedia';
     sectionHeading(ctx,'Dokumen Pendukung','',8);
     const lines=wrap(ctx,`${cvText}   ·   ${psychText}`,CONTENT_W,8.0,'normal');
     ensure(ctx,Math.max(5.5,lines.length*3.7));
@@ -784,8 +819,21 @@
     return ctx.doc;
   }
 
+  function safePdfFilePart(v){
+    return String(v||'')
+      .normalize('NFKD')
+      .replace(/[\u0300-\u036f]/g,'')
+      .replace(/[<>:"/\\|?*\x00-\x1F]/g,'')
+      .replace(/\s+/g,' ')
+      .replace(/[. ]+$/g,'')
+      .trim()
+      .slice(0,80);
+  }
+
   function filenameFor(model){
-    return `Laporan_Kandidat_${safeName(model?.candidate?.candidate_name)}_${safeName(model?.application?.application_id)}.pdf`;
+    const candidate=safePdfFilePart(model?.candidate?.candidate_name)||'Kandidat';
+    const position=safePdfFilePart(model?.position?.position_name)||'Posisi';
+    return `${candidate} - ${position} - Laporan Keseluruhan.pdf`;
   }
 
   async function ensureCvValidation(model,appId){
@@ -805,11 +853,18 @@
   async function resolveModel(appId){
     const state=window.CandidateDossierV1?.state;
     let model=null;
-    if(!appId&&state?.lastModel)model=state.lastModel;
-    else if(appId&&state?.lastModel?.application?.application_id===appId)model=state.lastModel;
-    else if(typeof window.collectCandidateDossierDataV1==='function')model=await window.collectCandidateDossierDataV1(appId);
-    else throw new Error('DOSSIER_COLLECTOR_NOT_AVAILABLE');
-    return await ensureCvValidation(model,appId);
+    if(appId&&typeof window.collectCandidateDossierDataV1==='function'){
+      model=await window.collectCandidateDossierDataV1(appId);
+      if(state){state.lastModel=model;state.lastAppId=appId;}
+    }else if(!appId&&state?.lastAppId&&typeof window.collectCandidateDossierDataV1==='function'){
+      model=await window.collectCandidateDossierDataV1(state.lastAppId);
+      if(state)state.lastModel=model;
+    }else if(!appId&&state?.lastModel){
+      model=state.lastModel;
+    }else{
+      throw new Error('DOSSIER_COLLECTOR_NOT_AVAILABLE');
+    }
+    return await ensureCvValidation(model,appId||model?.application?.application_id);
   }
 
   async function downloadCandidateDossierPdf(appId){
@@ -820,7 +875,7 @@
       toast('Laporan Kandidat PDF berhasil dibuat.','success');
       return doc;
     }catch(error){
-      console.error('[Laporan Kandidat PDF V1.6.1] download failed',error);
+      console.error('[Laporan Kandidat PDF V1.6.4] download failed',error);
       const message=error?.message==='JSPDF_NOT_AVAILABLE'?'Library jsPDF tidak tersedia pada halaman ini.':(error?.message||'PDF gagal dibuat.');
       toast('Laporan Kandidat PDF gagal dibuat: '+message,'danger');
       return null;
@@ -849,7 +904,7 @@
     const previewRoot=root.querySelector('#candidateDossierPreviewV1');
     const info=previewRoot?.previousElementSibling;
     if(info && /(Fase PDF|Fase Laporan|Fase Paket Dokumen|Fase Paket)/i.test(info.textContent||'')){
-      info.innerHTML='<b>Laporan PDF V1.6.1:</b> clean-grid Executive Recruitment Assessment Report. Paket Dokumen tetap menggunakan PDF dan model canonical yang sama.';
+      info.innerHTML='<b>Laporan PDF V1.6.4:</b> clean-grid Executive Recruitment Assessment Report. Paket Dokumen tetap menggunakan PDF dan model canonical yang sama.';
     }
   }
 
@@ -876,5 +931,5 @@
 
   installOpenHook();
   document.addEventListener('DOMContentLoaded',()=>setTimeout(installOpenHook,1800));
-  console.log('%cLaporan Kandidat PDF V1.6.1 active','color:#2563eb;font-weight:bold');
+  console.log('%cLaporan Kandidat PDF V1.6.4 active','color:#2563eb;font-weight:bold');
 })();

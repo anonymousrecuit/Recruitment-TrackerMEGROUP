@@ -15,7 +15,7 @@
   if(window.__ATS_CANDIDATE_DOSSIER_V1_ACTIVE) return;
   window.__ATS_CANDIDATE_DOSSIER_V1_ACTIVE = true;
 
-  const VERSION='1.1.0-preview';
+  const VERSION='1.1.1-preview';
   const state={lastModel:null,lastAppId:null};
   const TEST_LABELS={CIFT:'Tes Kognitif',PAPIKOSTIK:'PAPI Kostick',INTEGRITY:'Tes Integritas',MSDT:'MSDT',DISC:'DISC',OVERALL:'Kesimpulan'};
 
@@ -166,7 +166,10 @@
       sessionId:s.session_id||null,
       attemptNo:s.attempt_no||1,
       status:s.status||null,
+      startedAt:s.started_at||null,
       completedAt:s.completed_at||null,
+      expiresAt:s.expires_at||null,
+      createdAt:s.created_at||null,
       package:arr(asJson(s.test_package_snapshot)||s.test_package_snapshot),
       engineRecommendation:s.engine_recommendation||null,
       workflowDecision:s.workflow_decision||null,
