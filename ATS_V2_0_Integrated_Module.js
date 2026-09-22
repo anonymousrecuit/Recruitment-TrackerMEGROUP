@@ -132,7 +132,14 @@
   async function createPsychAccess(appId){const {data,error}=await sb.rpc('create_psychotest_access',{p_application_id:appId,p_expiry_days:7});if(error)return showToast('Gagal buat kode: '+error.message,'danger');await loadPsych(true);showAccessModal(appId,data);if(currentPage==='psychotests')renderPsych(false);}
   async function rotatePsychAccess(appId){const {data,error}=await sb.rpc('rotate_psychotest_access',{p_application_id:appId,p_expiry_days:7});if(error)return showToast('Gagal ganti kode: '+error.message,'danger');await loadPsych(true);showAccessModal(appId,data);if(currentPage==='psychotests')renderPsych(false);}
   async function createPsychRetest(appId){if(!confirm('Buat attempt psikotes baru? Hasil attempt sebelumnya tetap disimpan.'))return;const {data,error}=await sb.rpc('create_psychotest_retest',{p_application_id:appId,p_expiry_days:7});if(error)return showToast('Gagal buat retest: '+error.message,'danger');await loadPsych(true);showAccessModal(appId,data);if(currentPage==='psychotests')renderPsych(false);}
-  function showPsychAccess(appId){const s=latestPsych(appId);if(!s)return showToast('Sesi belum tersedia','warning');showAccessModal(appId,s);}
+  function showPsychAccess(appId){
+    const s=latestPsych(appId);
+    if(!s)return showToast('Sesi belum tersedia','warning');
+    const expiry=s?.expires_at?new Date(s.expires_at).getTime():NaN;
+    const expired=Number.isFinite(expiry)&&expiry<=Date.now()&&!['Selesai','Dibatalkan'].includes(s.status);
+    if(expired)return showToast('Akses psikotes sudah kedaluwarsa. Buat akses psikotes baru dari Antrian Seleksi.','warning');
+    showAccessModal(appId,s);
+  }
   function psychInviteMessageV22(appId,row){
     const app=appById(appId),c=candById(app?.candidate_id),p=posById(app?.position_id),co=coById(app?.company_id);
     const code=row?.access_code||latestPsych(appId)?.access_code||'';
@@ -903,6 +910,12 @@
 
   function screeningFor(appId){return (V21.screeningRows||[]).find(x=>x.application_id===appId)||null;}
   function psychFor(appId){return (V21.psychSessions||[]).filter(x=>x.application_id===appId).sort((a,b)=>Number(b.attempt_no||0)-Number(a.attempt_no||0))[0]||null;}
+  function psychExpired21(session){
+    if(!session||!session.expires_at)return false;
+    if(['Selesai','Dibatalkan'].includes(session.status))return false;
+    const expiry=new Date(session.expires_at).getTime();
+    return Number.isFinite(expiry)&&expiry<=Date.now();
+  }
   function scheduled21(appId,type){
     try{if(typeof scheduledInterview==='function')return scheduledInterview(appId,type);}catch(_){}
     return (DB?.interviews||[]).filter(i=>i.application_id===appId&&i.interview_type===type&&i.date).sort((a,b)=>new Date(b.date||0)-new Date(a.date||0))[0]||null;
@@ -945,8 +958,10 @@
     if(stage==='Psikotes'){
       const p=psychFor(appId);
       if(!p)return{tab:'psych',stage,processStatus:'Belum ada akses',decision:'Belum Ada',action:'psych-create',label:'Generate Akses Psikotes',tone:'blue'};
+      if(psychExpired21(p))return{tab:'psych',stage,processStatus:'Kedaluwarsa',decision:'Perlu Akses Baru',action:'psych-create',label:'Buat Akses Psikotes Baru',tone:'red'};
       if(['Belum Dimulai','Dalam Proses'].includes(p.status))return{tab:'psych',stage,processStatus:p.status,decision:p.workflow_decision||'Belum Ada',action:'psych-access',label:p.status==='Belum Dimulai'?'Lihat Akses Psikotes':'Lihat Status Psikotes',tone:p.status==='Dalam Proses'?'blue':'slate'};
-      if(['Kedaluwarsa','Dibatalkan'].includes(p.status))return{tab:'psych',stage,processStatus:p.status,decision:'Perlu Akses Baru',action:'psych-create',label:'Buat Akses Psikotes Baru',tone:'red'};
+      if(p.status==='Kedaluwarsa')return{tab:'psych',stage,processStatus:'Kedaluwarsa',decision:'Perlu Akses Baru',action:'psych-create',label:'Buat Akses Psikotes Baru',tone:'red'};
+      if(p.status==='Dibatalkan')return{tab:'psych',stage,processStatus:'Dibatalkan',decision:'Perlu Akses Baru',action:'psych-create',label:'Buat Akses Psikotes Baru',tone:'red'};
       if(p.status==='Selesai'&&(!p.workflow_decision||p.workflow_decision==='Perlu Review HR'))return{tab:'psych',stage,processStatus:'Selesai dikerjakan',decision:'Perlu Review HR',action:'psych-review',label:'Review Hasil Psikotes',tone:'amber'};
       if(p.status==='Selesai'&&p.workflow_decision==='Lanjut')return{tab:'psych',stage,processStatus:'Selesai dikerjakan',decision:'Lanjut',action:'hr-schedule',label:'Jadwalkan Interview HR',tone:'emerald'};
       if(p.workflow_decision==='Tidak Lanjut')return{tab:'psych',stage,processStatus:'Selesai',decision:'Tidak Lanjut',action:'reject-finalize',label:'Finalisasi Tidak Lanjut',tone:'red'};
@@ -1058,6 +1073,20 @@
       case'screen-review':return window.openScreenReviewV2?.(appId);
       case'screen-advance':return window.transitionStageV2?.(appId,'Psikotes');
       case'psych-create':return window.createPsychAccessV2?.(appId);
+      case'psych-renew':{
+        if(typeof window.rotatePsychAccessV2!=='function')return showToast('Fungsi pembaruan akses psikotes tidak tersedia','danger');
+        await window.rotatePsychAccessV2(appId);
+        await loadQueueData(true);
+        renderSelectionQueue(false);
+        return;
+      }
+      case'psych-retest':{
+        if(typeof window.createPsychRetestV2!=='function')return showToast('Fungsi attempt baru psikotes tidak tersedia','danger');
+        await window.createPsychRetestV2(appId);
+        await loadQueueData(true);
+        renderSelectionQueue(false);
+        return;
+      }
       case'psych-access':return window.showPsychAccessV2?.(appId);
       case'psych-review':return window.openPsychReviewV2?.(appId);
       case'psych-advance':return typeof openInterviewModal==='function'?openInterviewModal(appId,'Interview HR'):showToast('Form jadwal Interview HR tidak tersedia','danger');

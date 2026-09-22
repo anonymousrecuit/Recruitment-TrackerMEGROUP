@@ -1020,10 +1020,10 @@
 Terima kasih telah melamar posisi *{posisi}* di *{brand}*.
 
 Anda diundang mengikuti *Psikotes* dengan detail berikut:
-📅 Tanggal: {tanggal}
-🔑 Kode / Link: {kode}
+- Batas pengerjaan: {tanggal}
+- Kode Akses: {kode}
 
-Mohon konfirmasi kehadiran dengan membalas pesan ini.
+Mohon menyelesaikan psikotes sebelum batas waktu yang telah ditentukan.
 
 Hormat kami,
 {rekruter}
@@ -1099,12 +1099,35 @@ Tim Rekrutmen {brand}`
       }
     ];
 
+    function migratePsychWaTemplateV5(list) {
+      if (!Array.isArray(list)) return list;
+      let changed = false;
+      const next = list.map(t => {
+        if (!t || t.id !== 'psikotes' || typeof t.body !== 'string') return t;
+        let body = t.body;
+        const before = body;
+        body = body
+          .replace(/📅\s*Tanggal\s*:\s*\{tanggal\}/g, '- Batas pengerjaan: {tanggal}')
+          .replace(/🔑\s*Kode\s*\/\s*Link\s*:\s*\{kode\}/g, '- Kode Akses: {kode}')
+          .replace(/Mohon konfirmasi kehadiran dengan membalas pesan ini\.?/gi, 'Mohon menyelesaikan psikotes sebelum batas waktu yang telah ditentukan.');
+        if (body !== before) {
+          changed = true;
+          return { ...t, body };
+        }
+        return t;
+      });
+      if (changed) {
+        try { localStorage.setItem(WA_TEMPLATES_KEY, JSON.stringify(next)); } catch (e) {}
+      }
+      return next;
+    }
+
     function getWaTemplates() {
       try {
         const raw = localStorage.getItem(WA_TEMPLATES_KEY);
         if (raw) {
           const parsed = JSON.parse(raw);
-          if (Array.isArray(parsed) && parsed.length) return parsed;
+          if (Array.isArray(parsed) && parsed.length) return migratePsychWaTemplateV5(parsed);
         }
       } catch (e) {}
       return JSON.parse(JSON.stringify(DEFAULT_WA_TEMPLATES));
