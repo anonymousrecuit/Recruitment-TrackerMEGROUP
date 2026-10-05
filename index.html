@@ -17512,6 +17512,8 @@ Tim Rekrutmen {brand}`
     const SUPABASE_URL = 'https://nhzlsxvrlqswdxsnkwhv.supabase.co';
     const SUPABASE_ANON_KEY = 'sb_publishable_5CArCM5F9Oxl_i1aWZzd_Q_G-yFAzv-';
     const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    window.sb = sb;
+    window.SUPABASE_URL = SUPABASE_URL;
     const USE_SUPABASE = true;
 
     const COMPANY_CODE_ALIASES = { 'CMP-001':'OJ', 'CMP-002':'MMB', 'CMP-003':'PEU' };
