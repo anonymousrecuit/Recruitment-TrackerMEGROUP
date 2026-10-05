@@ -1020,10 +1020,10 @@
 Terima kasih telah melamar posisi *{posisi}* di *{brand}*.
 
 Anda diundang mengikuti *Psikotes* dengan detail berikut:
-📅 Tanggal: {tanggal}
-🔑 Kode / Link: {kode}
+- Batas pengerjaan: {tanggal}
+- Kode Akses: {kode}
 
-Mohon konfirmasi kehadiran dengan membalas pesan ini.
+Mohon menyelesaikan psikotes sebelum batas waktu yang telah ditentukan.
 
 Hormat kami,
 {rekruter}
@@ -1099,12 +1099,35 @@ Tim Rekrutmen {brand}`
       }
     ];
 
+    function migratePsychWaTemplateV5(list) {
+      if (!Array.isArray(list)) return list;
+      let changed = false;
+      const next = list.map(t => {
+        if (!t || t.id !== 'psikotes' || typeof t.body !== 'string') return t;
+        let body = t.body;
+        const before = body;
+        body = body
+          .replace(/📅\s*Tanggal\s*:\s*\{tanggal\}/g, '- Batas pengerjaan: {tanggal}')
+          .replace(/🔑\s*Kode\s*\/\s*Link\s*:\s*\{kode\}/g, '- Kode Akses: {kode}')
+          .replace(/Mohon konfirmasi kehadiran dengan membalas pesan ini\.?/gi, 'Mohon menyelesaikan psikotes sebelum batas waktu yang telah ditentukan.');
+        if (body !== before) {
+          changed = true;
+          return { ...t, body };
+        }
+        return t;
+      });
+      if (changed) {
+        try { localStorage.setItem(WA_TEMPLATES_KEY, JSON.stringify(next)); } catch (e) {}
+      }
+      return next;
+    }
+
     function getWaTemplates() {
       try {
         const raw = localStorage.getItem(WA_TEMPLATES_KEY);
         if (raw) {
           const parsed = JSON.parse(raw);
-          if (Array.isArray(parsed) && parsed.length) return parsed;
+          if (Array.isArray(parsed) && parsed.length) return migratePsychWaTemplateV5(parsed);
         }
       } catch (e) {}
       return JSON.parse(JSON.stringify(DEFAULT_WA_TEMPLATES));
@@ -18169,47 +18192,67 @@ Tim Rekrutmen {brand}`
 
     function populateGlobalFilters() {
       const sel = document.getElementById('globalCompanyFilter');
-      const prev = sel.value;
       const saved = sessionStorage.getItem('rt_global_company') || 'all';
       const access = getAccessCompanyIds();
-      let companies = DB.companies.filter(c => c.status === 'Aktif');
+
+      const allCompanies = Array.isArray(DB?.companies) ? DB.companies : [];
+      const allSources = Array.isArray(DB?.sources) ? DB.sources : [];
+
+      let companies = allCompanies.filter(c => c && c.status === 'Aktif');
       if (access) companies = companies.filter(c => access.includes(c.company_id));
 
-      sel.innerHTML = '';
-      if (!access || companies.length > 1) {
-        sel.innerHTML = '<option value="all">Semua Perusahaan</option>';
-      }
-      companies.forEach(c => {
-        sel.innerHTML += `<option value="${c.company_id}">${c.company_code} - ${c.brand}</option>`;
-      });
-      if (access && companies.length === 1) {
-        sel.value = companies[0].company_id;
-        sel.disabled = true;
-      } else {
-        sel.disabled = false;
-        const prefer = (prev && prev !== 'all' && [...sel.options].some(o => o.value === prev)) ? prev
-          : (saved && [...sel.options].some(o => o.value === saved) ? saved : 'all');
-        if ([...sel.options].some(o => o.value === prefer)) sel.value = prefer;
-        else if (sel.options.length) sel.selectedIndex = 0;
+      if (sel) {
+        const prev = sel.value;
+
+        sel.innerHTML = '';
+        if (!access || companies.length > 1) {
+          sel.innerHTML = '<option value="all">Semua Perusahaan</option>';
+        }
+
+        companies.forEach(c => {
+          sel.innerHTML += `<option value="${c.company_id}">${c.company_code || ''} - ${c.brand || c.company_name || ''}</option>`;
+        });
+
+        if (access && companies.length === 1) {
+          sel.value = companies[0].company_id;
+          sel.disabled = true;
+        } else {
+          sel.disabled = false;
+          const prefer =
+            (prev && prev !== 'all' && [...sel.options].some(o => o.value === prev))
+              ? prev
+              : (saved && [...sel.options].some(o => o.value === saved) ? saved : 'all');
+
+          if ([...sel.options].some(o => o.value === prefer)) sel.value = prefer;
+          else if (sel.options.length) sel.selectedIndex = 0;
+        }
       }
 
-      // Pipeline filter
       const ps = document.getElementById('pipeCompanyFilter');
       if (ps) {
         const cur = ps.value;
         ps.innerHTML = '<option value="all">Semua Perusahaan</option>';
-        DB.companies.forEach(c => { ps.innerHTML += `<option value="${c.company_id}">${c.brand}</option>`; });
+        allCompanies.forEach(c => {
+          if (!c) return;
+          ps.innerHTML += `<option value="${c.company_id}">${c.brand || c.company_name || ''}</option>`;
+        });
         if ([...ps.options].some(o => o.value === cur)) ps.value = cur;
       }
 
-      // Candidate filters
       const stageSel = document.getElementById('candFilterStage');
       if (stageSel && stageSel.options.length <= 1) {
-        getStages().forEach(s => { stageSel.innerHTML += `<option value="${s}">${s}</option>`; });
+        const stages = typeof getStages === 'function' ? getStages() : [];
+        (Array.isArray(stages) ? stages : []).forEach(stage => {
+          stageSel.innerHTML += `<option value="${stage}">${stage}</option>`;
+        });
       }
+
       const srcSel = document.getElementById('candFilterSource');
       if (srcSel && srcSel.options.length <= 1) {
-        DB.sources.forEach(s => { srcSel.innerHTML += `<option value="${s.source_id}">${s.source_name}</option>`; });
+        allSources.forEach(source => {
+          if (!source) return;
+          srcSel.innerHTML += `<option value="${source.source_id}">${source.source_name || ''}</option>`;
+        });
       }
     }
 
@@ -18279,6 +18322,7 @@ Tim Rekrutmen {brand}`
 
     // ---- DASHBOARD ----
     function renderDashboard() {
+      const companyId = getFilteredCompanyId();
       let apps = scopeByCompany(DB.applications);
       let mps = scopeByCompany(DB.manpower);
       let reqs = scopeByCompany(DB.requisitions);
@@ -18399,7 +18443,7 @@ Tim Rekrutmen {brand}`
       const totalApps = apps.length || 1;
       const hiredCount = apps.filter(a => a.status === 'Diterima').length;
       document.getElementById('hiringRate').textContent = Math.round(hiredCount / totalApps * 100) + '%';
-      const offers = DB.offerings.filter(o => {
+      const offers = (Array.isArray(DB?.offerings) ? DB.offerings : []).filter(o => {
         const a = getApplication(o.application_id);
         return a && (!companyId || a.company_id === companyId);
       });
@@ -19442,7 +19486,7 @@ Tim Rekrutmen {brand}`
           <button onclick="window.print()" style="padding:10px 18px;background:#2563eb;color:#fff;border:0;border-radius:8px;font-weight:600;cursor:pointer">Cetak / Simpan PDF</button>
           <button onclick="window.close()" style="padding:10px 18px;border:1px solid #e2e8f0;border-radius:8px;cursor:pointer">Tutup</button>
         </div>
-        </body></html>`;
+</body></html>`;
       const w = window.open('', '_blank');
       if (!w) return showToast('Izinkan pop-up untuk membuka surat', 'warning');
       w.document.write(html);
@@ -19523,13 +19567,31 @@ Tim Rekrutmen {brand}`
     // ---- TALENT POOL ----
     function renderTalentPool() {
       const apps = scopeByCompany(DB.applications).filter(a => a.status === 'Talent Pool' || a.current_stage === 'Talent Pool');
-      const tbody = document.getElementById('talentTableBody');
+      // TALENT_POOL_CLICKABLE_V2
+        const tbody = document.getElementById('talentTableBody');
       tbody.innerHTML = apps.map(a => {
         const c = getCandidate(a.candidate_id);
         const pos = getPosition(a.position_id);
         const co = getCompany(a.company_id);
-        return `<tr class="border-b border-slate-100">
-          <td class="px-4 py-3 font-medium">${c?.candidate_name}</td>
+        return `<tr
+      class="border-b border-slate-100 hover:bg-blue-50 cursor-pointer transition-colors"
+      title="Klik untuk membuka Candidate 360°"
+      onclick="viewCandidateDetail('${c?.candidate_id || a.candidate_id}','${a.application_id}')">
+          
+<td class="px-4 py-3 font-medium">
+    <div class="flex flex-col items-start gap-1">
+        <span class="text-slate-900 font-semibold">
+            ${c?.candidate_name || '-'}
+        </span>
+
+        <button
+            type="button"
+            onclick="event.stopPropagation(); viewCandidateDetail('${c?.candidate_id || a.candidate_id}','${a.application_id}')"
+            class="text-xs text-blue-700 hover:text-blue-900 hover:underline font-medium">
+            <i class="fas fa-user mr-1"></i>Buka 360°
+        </button>
+    </div>
+</td>
           <td class="px-4 py-3">${pos?.position_name}</td>
           <td class="px-4 py-3">${co?.brand}</td>
           <td class="px-4 py-3 text-yellow-500">${'★'.repeat(a.rating||0)}</td>
@@ -21555,6 +21617,28 @@ Tim Rekrutmen {brand}`
       window.reloadFromSupabase = () => loadFromSupabase().then(() => { renderAll(); showToast('Reloaded', 'success'); });
       console.log('%cAdmin + Supabase Auth aktif', 'color:#2563eb;font-weight:bold');
     });
-  </script><script src="./ATS_V2_0_Integrated_Module.js"></script>
+  </script>
+<script src="./ATS_V24_Supabase_Compatibility.js"></script>
+<script src="./ATS_V2_0_Integrated_Module.js"></script>
+<script src="./ATS_Psych_Queue_Fix_V1.js"></script>
+<script src="./Candidate_CV_AutoRead_V1.js"></script>
+<script src="./Candidate_Dossier_V1.js"></script>
+<script src="./Candidate_Dossier_PDF_V1.js"></script>
+<script src="./Candidate_Document_Package_V1.js"></script>
+<script src="./Candidate_CV_Validation_Gate_V1.js"></script>
+<script src="Interview_Workflow_Fix_V1.js"></script>
+<script src="Offering_Workflow_Patch_V1_1.js"></script>
+<script src="Offering_DB_Bridge_V1_2.js"></script>
+<script src="Offering_Delivery_Workflow_V1_3.js"></script>
+<script src="Offering_Unified_Form_V1_4.js"></script>
+
+  <!-- CAREER_PUBLIC_STANDALONE_V16_13 -->
+  <script src="Career_Public_Standalone_V16_13.js"></script>
+
+  <!-- CAREER_FORM_CV_ADDON_V16_16 -->
+  <script src="Career_Form_CV_Addon_V16_16.js"></script>
+
+<!-- CANDIDATE_CV_PRIVATE_RUNTIME_V17_3 -->
+<script src="./Candidate_CV_Private_Runtime_V17_3.js"></script>
 </body>
 </html>
