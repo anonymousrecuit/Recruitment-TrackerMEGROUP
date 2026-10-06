@@ -398,7 +398,7 @@ tr:hover td{background:var(--paper)}
 // ── SUPABASE ATS CONFIG ──
 const SUPABASE_URL = 'https://nhzlsxvrlqswdxsnkwhv.supabase.co';
 const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_5CArCM5F9Oxl_i1aWZzd_Q_G-yFAzv-';
-const SUPABASE_CLIENT_VERSION = 'SiPsiko-ATS-1.0';
+const SUPABASE_CLIENT_VERSION = 'SiPsiko-ATS-2.2';
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
   auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false }
 });
@@ -1467,8 +1467,10 @@ async function finalizeTes(){
   if(hasMSDT) mr=scoreMsdt(tesState.msdtAnswers);
   if(hasDISC) ds=calcDisc(tesState.discAnswers);
   if(hasINTEG) ig=scoreIntegrity(tesState.integAAnswers,tesState.integBAnswers,tesState.integCAnswers);
-  const rec=hasPAPI?computeRec(avg,pa):'Masih Dapat Disarankan';
   const cognitiveScore=tesState.tkTotal!=null?tesState.tkTotal:null;
+  const integrityRisk=ig?integRiskLabel(ig.totalA,ig.totalB):null;
+  const recEval=evaluateRecommendation(cognitiveScore,avg,pa,tesState.candidate.position,integrityRisk);
+  const rec=recEval.label;
   const cognitiveDetail=tesState.tkSecScores||{};
   const cognitiveInterpretation=hasCIFT&&cognitiveScore!=null?stripHtmlText(tkNarr(cognitiveScore,cognitiveDetail)) : '';
   const papiNarrative=hasPAPI?stripHtmlText(buildNarr(avg)):'';
@@ -1477,7 +1479,7 @@ async function finalizeTes(){
   const discDominant=ds?Object.entries(ds).sort((a,b)=>b[1]-a[1])[0]?.[0]:null;
   const discInterpretation=discDominant&&DT[discDominant]?`Profil DISC dominan: ${discDominant} — ${DT[discDominant].name}. ${DT[discDominant].desc}`:'';
   const integrityInterpretation=ig?stripHtmlText(integNarr(ig.totalA,ig.totalB,ig.totalC)):'';
-  const overallInterpretation=hasPAPI?stripHtmlText(buildConc(avg,rec,tesState.candidate.position)):[cognitiveInterpretation,msdtInterpretation,discInterpretation,integrityInterpretation].filter(Boolean).join(' ');
+  const overallInterpretation=stripHtmlText(buildConc(avg,rec,tesState.candidate.position,cognitiveScore,recEval.reason,recEval.benchmark));
 
   const resultPayload={
     cognitiveScore,
@@ -1496,6 +1498,10 @@ async function finalizeTes(){
     integTotalC:ig?ig.totalC:null,
     integrityInterpretation,
     recommendation:rec,
+    recommendationLevel:recEval.level,
+    recommendationReason:recEval.reason,
+    cognitiveBenchmark:recEval.benchmark,
+    papiRecommendationScore:recEval.papiScore,
     overallInterpretation
   };
   const rawAnswers={
@@ -1576,12 +1582,50 @@ function integNarr(totalA,totalB,totalC){
   else n+=`Secara umum ybs menunjukkan sinyal integritas yang baik pada instrumen ini.`;
   return n;
 }
-function computeRec(avg,pa){
+function positionCognitiveBenchmark(positionName){
+  const n=String(positionName||'').toLowerCase();
+  if(/inventory|stock|finance|account|akunting|payroll|tax|pajak|purchasing|admin|analyst|analisa|supervisor|manager|manajer|legal|hr|rekrut|warehouse|gudang/.test(n)) return 15;
+  if(/kasir|checker|sales|marketing|telesales|leader|kepala|security|maintenance|teknisi|operator/.test(n)) return 12;
+  return 10;
+}
+
+function computePapiBand(avg,pa){
   let score=0;
   if(pa>=5)score+=50;else if(pa>=3.5)score+=38;else if(pa>=2)score+=25;else score+=10;
   if((avg['Leadership']||0)>=5)score+=30;else if((avg['Leadership']||0)>=3)score+=18;else score+=6;
   if((avg['Work Direction']||0)>=5)score+=20;else if((avg['Work Direction']||0)>=3)score+=12;else score+=4;
-  if(score>=70)return'Dapat Disarankan';if(score>=45)return'Masih Dapat Disarankan';return'Tidak Dapat Disarankan';
+  if(score>=70)return {band:'strong',score:score};
+  if(score>=45)return {band:'middle',score:score};
+  return {band:'low',score:score};
+}
+
+function evaluateRecommendation(cognitiveScore,avg,pa,positionName,integrityRisk){
+  const benchmark=positionCognitiveBenchmark(positionName);
+  const c=(cognitiveScore==null||cognitiveScore==='')?null:Number(cognitiveScore);
+  const papi=computePapiBand(avg||{},Number(pa||0));
+
+  if(c!==null && Number.isFinite(c) && c<10){
+    return {label:'Tidak Disarankan',level:'block',benchmark:benchmark,papiScore:papi.score,reason:'Skor kognitif berada di bawah batas minimum 10/30. Hasil kepribadian tidak digunakan untuk menutup risiko kognitif yang kritis.'};
+  }
+  if(integrityRisk==='Risiko Tinggi') {
+    return {label:'Perlu Review HR',level:'review',benchmark:benchmark,papiScore:papi.score,reason:'Terdapat sinyal risiko integritas tinggi yang wajib divalidasi HR melalui wawancara perilaku dan pemeriksaan bukti pendukung.'};
+  }
+  if(c!==null && Number.isFinite(c) && c<benchmark){
+    return {label:'Perlu Review HR',level:'review',benchmark:benchmark,papiScore:papi.score,reason:'Skor kognitif belum mencapai benchmark posisi '+benchmark+'/30. Kandidat tidak boleh direkomendasikan otomatis.'};
+  }
+  if(papi.band==='strong') {
+    return {label:'Dapat Dipertimbangkan',level:'support',benchmark:benchmark,papiScore:papi.score,reason:'Skor kognitif memenuhi benchmark posisi dan kecocokan PAPI berada pada rentang mendukung. Keputusan akhir tetap memerlukan pertimbangan HR.'};
+  }
+  if(papi.band==='middle') {
+    return {label:'Perlu Review HR',level:'review',benchmark:benchmark,papiScore:papi.score,reason:'Skor kognitif memenuhi benchmark, tetapi kecocokan PAPI berada pada rentang sedang sehingga perlu validasi HR.'};
+  }
+  return {label:'Perlu Review HR',level:'review',benchmark:benchmark,papiScore:papi.score,reason:'Kecocokan PAPI rendah; gunakan wawancara dan bukti kompetensi lain sebelum menentukan keputusan.'};
+}
+
+function computeRec(avg,pa){
+  const p=computePapiBand(avg||{},Number(pa||0));
+  if(p.band==='strong')return'Dapat Dipertimbangkan';
+  return'Perlu Review HR';
 }
 
 // ── KAITAN HASIL TES DENGAN TUNTUTAN POSISI ──
@@ -2117,18 +2161,36 @@ function buildNarr(avg){
   n+=tp>=5?'Sementara itu, dari aspek temperament, ybs tergolong pribadi yang terbuka, energik, adaptif, dan mampu menghadapi tekanan dengan baik.':'Sementara itu, dari aspek temperament, ybs tergolong pribadi yang cukup terbuka, mampu menyesuaikan diri dengan lingkungan, dan cenderung menghindari konflik.';
   return n;
 }
-function buildConc(avg,rec,pos){
+function buildConc(avg,rec,pos,cognitiveScore,gateReason,benchmark){
   const st=[],im=[];
   if((avg['Leadership']||0)>=4)st.push('kemampuan menerima tanggung jawab');
   if((avg['Work Style']||0)>=4)st.push('ketelitian dan keteraturan kerja');
   if((avg['Temperament']||0)>=4)st.push('kemampuan beradaptasi');
   if((avg['Social Nature']||0)>=4)st.push('kemampuan membangun relasi');
-  if(!st.length)st.push('kemauan bekerja');
+  if(!st.length)st.push('beberapa aspek kepribadian yang masih dapat dikembangkan');
   if((avg['Work Direction']||0)<4)im.push('orientasi terhadap pencapaian target');
   if((avg['Activity']||0)<4)im.push('inisiatif dan proaktivitas');
   if((avg['Leadership']||0)<4)im.push('ketegasan dalam pengambilan keputusan');
   if(!im.length)im.push('konsistensi kinerja');
-  return`Secara keseluruhan, ybs memiliki potensi yang ${rec==='Dapat Disarankan'?'baik':rec==='Masih Dapat Disarankan'?'cukup baik':'perlu diperhatikan'} untuk posisi ${pos}, terutama didukung oleh ${st.join(', ')}. Namun demikian, ybs masih perlu mengembangkan ${im.join(', ')}.`;
+
+  let head='Hasil psikotes untuk posisi '+pos+' memerlukan pertimbangan HR.';
+  const c=(cognitiveScore==null||cognitiveScore==='')?null:Number(cognitiveScore);
+  if(rec==='Tidak Disarankan'){
+    head='Hasil psikotes belum mendukung untuk posisi '+pos+'.';
+  }else if(rec==='Dapat Dipertimbangkan'){
+    head='Hasil psikotes dapat dipertimbangkan untuk posisi '+pos+', namun bukan keputusan otomatis.';
+  }
+
+  let cog='';
+  if(c!==null && Number.isFinite(c)){
+    cog=' Skor kognitif '+c+'/30';
+    if(benchmark) cog+=' dengan benchmark posisi '+benchmark+'/30';
+    cog+='.';
+  }
+  const strength=' Aspek yang relatif mendukung: '+st.join(', ')+'.';
+  const improve=' Area yang tetap perlu divalidasi atau dikembangkan: '+im.join(', ')+'.';
+  const reason=gateReason?' Dasar rekomendasi: '+gateReason:'';
+  return head+cog+reason+strength+improve+' Keputusan akhir recruitment tetap berada pada HR dan harus mempertimbangkan wawancara, pengalaman, kompetensi, serta bukti seleksi lainnya.';
 }
 
 // ── INIT ──
