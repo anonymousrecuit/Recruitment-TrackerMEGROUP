@@ -398,7 +398,7 @@ tr:hover td{background:var(--paper)}
 // ── SUPABASE ATS CONFIG ──
 const SUPABASE_URL = 'https://nhzlsxvrlqswdxsnkwhv.supabase.co';
 const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_5CArCM5F9Oxl_i1aWZzd_Q_G-yFAzv-';
-const SUPABASE_CLIENT_VERSION = 'SiPsiko-ATS-2.2';
+const SUPABASE_CLIENT_VERSION = 'SiPsiko-ATS-2.3-IC-PILOT';
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
   auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false }
 });
@@ -895,6 +895,7 @@ function candidateFromSession(data){
     position: data.position_name || '-',
     company: data.company_name || '-',
     brand: data.brand || '',
+    positionId: data.position_id || null,
     tests: normalizeTestPackage(data.tests),
     status: data.status || '',
     expiresAt: data.expires_at || null,
@@ -1481,7 +1482,10 @@ async function finalizeTes(){
   const integrityInterpretation=ig?stripHtmlText(integNarr(ig.totalA,ig.totalB,ig.totalC)):'';
   const overallInterpretation=stripHtmlText(buildConc(avg,rec,tesState.candidate.position,cognitiveScore,recEval.reason,recEval.benchmark));
 
+  const jobFitProfile=buildInventoryControlJobFit(tesState.candidate.positionId,cognitiveScore,ps,ds||{});
   const resultPayload={
+    assessmentPositionId:tesState.candidate.positionId||null,
+    jobFitProfile,
     cognitiveScore,
     cognitiveDetail,
     cognitiveInterpretation,
@@ -1587,6 +1591,25 @@ function positionCognitiveBenchmark(positionName){
   if(/inventory|stock|finance|account|akunting|payroll|tax|pajak|purchasing|admin|analyst|analisa|supervisor|manager|manajer|legal|hr|rekrut|warehouse|gudang/.test(n)) return 15;
   if(/kasir|checker|sales|marketing|telesales|leader|kepala|security|maintenance|teknisi|operator/.test(n)) return 12;
   return 10;
+}
+
+function buildInventoryControlJobFit(positionId,cognitiveScore,papiScores,discScores){
+  if(positionId!=='MEG-GUD-002')return null;
+  const p=papiScores||{},d=discScores||{},vals=Object.values(p).map(Number).filter(Number.isFinite).sort((a,b)=>a-b);
+  const median=vals.length?(vals.length%2?vals[(vals.length-1)/2]:(vals[vals.length/2-1]+vals[vals.length/2])/2):null;
+  const topDisc=Object.entries(d).sort((a,b)=>Number(b[1])-Number(a[1])).slice(0,2).map(x=>x[0]);
+  const cog=Number(cognitiveScore),cogStatus=Number.isFinite(cog)?(cog>=15?'Indikasi Mendukung':cog<10?'Area Perhatian':'Perlu Validasi'):'Perlu Validasi';
+  const papiSignal=(...keys)=>median==null?'Perlu Validasi':keys.some(k=>Number(p[k])>=median)?'Indikasi Mendukung':'Perlu Validasi';
+  const discSignal=(...keys)=>topDisc.some(k=>keys.includes(k))?'Indikasi Mendukung':'Perlu Validasi';
+  const combine=(...s)=>s.includes('Area Perhatian')?'Area Perhatian':s.every(x=>x==='Indikasi Mendukung')?'Indikasi Mendukung':'Perlu Validasi';
+  const make=(id,name,weight,status,evidence,questions)=>({id,name,weight,status,evidence,interviewQuestions:questions});
+  return {version:'IC-JPF-V1',positionId:'MEG-GUD-002',advisoryOnly:true,cognitiveBenchmark:15,competencies:[
+    make('MEG-COMP-0164','Inventory Control & Accuracy',0.30,combine(cogStatus,papiSignal('C','D','R')), 'Kognitif '+(Number.isFinite(cog)?cog+'/30':'belum tersedia')+'; PAPI digunakan sebagai indikasi perilaku, bukan skor kecocokan.', ['Ceritakan pengalaman menemukan selisih stok. Bagaimana Anda memastikan akar masalahnya?','Bagaimana cara Anda menjaga akurasi saat volume transaksi atau barang sedang tinggi?']),
+    make('MEG-COMP-0165','Attention to Detail & Inspection',0.25,combine(cogStatus,papiSignal('C','D','G')), 'Menggabungkan indikator kognitif dan kecenderungan kerja teliti dari PAPI secara advisory.', ['Berikan contoh kesalahan kecil yang pernah Anda temukan sebelum menjadi masalah besar.','Apa checklist yang Anda gunakan ketika memeriksa stok fisik?']),
+    make('MEG-COMP-0166','Inventory Analysis & Stock Monitoring',0.20,cogStatus,'Benchmark kognitif Inventory Control 15/30; hasil di bawah benchmark perlu validasi lebih lanjut.', ['Bagaimana Anda membaca pola fast moving, slow moving, dan dead stock?','Data apa yang Anda cek ketika stok sistem berbeda dengan stok fisik?']),
+    make('MEG-COMP-0167','Problem Solving & Investigation',0.15,combine(cogStatus,discSignal('C','D')), 'Kognitif menjadi bukti utama; DISC hanya membantu menentukan area eksplorasi wawancara.', ['Ceritakan investigasi selisih stok yang paling sulit yang pernah Anda tangani.','Jika penyebab selisih belum jelas sementara operasional berjalan, apa langkah Anda?']),
+    make('MEG-COMP-0168','Coordination & Documentation',0.10,combine(papiSignal('G','N','P'),discSignal('C','S','I')), 'PAPI dan DISC dipakai sebagai bukti perilaku pendukung dan wajib divalidasi melalui wawancara.', ['Bagaimana Anda memastikan temuan stok terdokumentasi dan ditindaklanjuti divisi terkait?','Ceritakan situasi ketika Anda harus menyampaikan temuan yang tidak nyaman kepada tim lain.'])
+  ]};
 }
 
 function computePapiBand(avg,pa){
