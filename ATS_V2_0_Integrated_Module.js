@@ -18,7 +18,7 @@
     psychLoading:false,
     screeningLoading:false,
     psychUrlKey:'ats_v2_psychotest_url',
-    defaultPsychUrl:'psikotes.html'
+    defaultPsychUrl:'https://anonymousrecuit.github.io/Recruitment-TrackerMEGROUP/psikotes.html?v=20261010-icfix1'
   };
 
   const esc=v=>typeof atsEsc==='function'?atsEsc(v):String(v??'').replace(/[&<>\"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#039;'}[ch]));
@@ -33,8 +33,15 @@
 
   function psychBaseUrl(){
     const saved=(localStorage.getItem(V2.psychUrlKey)||'').trim();
-    const raw=saved||V2.defaultPsychUrl;
-    try{return new URL(raw,window.location.href).href.split('?')[0].split('#')[0];}catch(_){return raw;}
+    let raw=saved||V2.defaultPsychUrl;
+    try{
+      const u=new URL(raw,window.location.href);
+      if(u.protocol==='file:'||/psikotesmegroupnew\.netlify\.app$/i.test(u.hostname)){
+        raw=V2.defaultPsychUrl;
+        localStorage.setItem(V2.psychUrlKey,raw);
+      }
+      return new URL(raw,window.location.href).href;
+    }catch(_){return V2.defaultPsychUrl;}
   }
   function latestPsych(appId){return (V2.psychSessions||[]).filter(s=>s.application_id===appId).sort((a,b)=>Number(b.attempt_no||0)-Number(a.attempt_no||0))[0]||null;}
   function testLabel(code){return ({CIFT:'Tes Kognitif',PAPIKOSTIK:'PAPI Kostick',INTEGRITY:'Tes Integritas',MSDT:'MSDT',DISC:'DISC',OVERALL:'Kesimpulan'})[code]||code||'Tes';}
