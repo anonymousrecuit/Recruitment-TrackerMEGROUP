@@ -1064,13 +1064,7 @@ function renderTesStep(){
   const lbl={start:'Mulai',cift:'Kognitif',papikostik:'Papikostik',integritas:'Integritas',msdt:'MSDT',disc:'DISC',selesai:'Selesai'};
   const prog=cur!=='start'&&cur!=='selesai'?`<div class="tes-progress"><div style="font-size:12px;font-weight:700;color:var(--muted);white-space:nowrap">${lbl[cur]}</div><div class="prog-bar-bg"><div class="prog-bar-fill" style="width:${pct}%"></div></div><div style="font-size:12px;font-weight:700;color:var(--muted);white-space:nowrap">${done}/${total}</div></div>`:'';
   if(cur==='start')wrap.innerHTML=prog+rStart();
-  else if(cur==='cift'){
-    wrap.innerHTML=prog+rCIFT();
-    // Mulai countdown otomatis jika sedang di fase menghafal
-    const start=tkPage*TK_PER_PAGE,end=Math.min(start+TK_PER_PAGE,30);
-    const isMemorySection = start<30 && end>26;
-    if(isMemorySection && tkMemoryPhase==='memorize') startTkMemoryCountdown();
-  }
+  else if(cur==='cift'){wrap.innerHTML=prog+rCIFT();}
   else if(cur==='papikostik')wrap.innerHTML=prog+rPapi();
   else if(cur==='integritas')wrap.innerHTML=prog+rIntegritas();
   else if(cur==='msdt')wrap.innerHTML=prog+rMSDT();
@@ -1083,48 +1077,48 @@ function rStart(){const c=tesState.candidate;return`<div class="card" style="max
 
 
 // ── CFIT DATA ──
-// ── TES KOGNITIF SEDERHANA (30 Soal) ──
+// ── TES KOGNITIF UMUM (30 Soal — Verbal, Numerik, Logika & Penalaran Analitis) ──
+// Sumber: Tes_Kognitif_30_Soal_Psikotes_Perusahaan.docx
 const TK_QUESTIONS = [
-  // A. LOGIKA ANGKA (1-10)
-  {no:1,section:'A',q:'Lanjutkan pola angka berikut: 2, 4, 6, 8, ___',opts:['9','10','12','14'],ans:'b'},
-  {no:2,section:'A',q:'Lanjutkan pola angka berikut: 3, 6, 12, 24, ___',opts:['30','36','48','60'],ans:'c'},
-  {no:3,section:'A',q:'Lanjutkan pola angka berikut: 5, 10, 15, 20, ___',opts:['22','23','25','30'],ans:'c'},
-  {no:4,section:'A',q:'Lanjutkan pola angka berikut: 1, 3, 6, 10, 15, ___',opts:['18','20','21','25'],ans:'c'},
-  {no:5,section:'A',q:'Angka yang tepat untuk melengkapi pola: 100, 90, 80, 70, ___',opts:['50','55','60','65'],ans:'c'},
-  {no:6,section:'A',q:'Jika 4 + 6 = 10, maka 10 + 15 = ___',opts:['20','25','30','35'],ans:'b'},
-  {no:7,section:'A',q:'Jika harga 1 roti adalah Rp5.000, maka harga 4 roti adalah:',opts:['Rp10.000','Rp15.000','Rp20.000','Rp25.000'],ans:'c'},
-  {no:8,section:'A',q:'Seorang karyawan bekerja dari pukul 08.00 sampai 16.00. Berapa jam ia bekerja?',opts:['6 jam','7 jam','8 jam','9 jam'],ans:'c'},
-  {no:9,section:'A',q:'Jika 3 orang dapat menyelesaikan 3 pekerjaan dalam 3 jam, maka 6 orang menyelesaikan 6 pekerjaan dalam waktu:',opts:['3 jam','4 jam','6 jam','9 jam'],ans:'a'},
-  {no:10,section:'A',q:'Mana angka yang paling besar?',opts:['0,75','0,5','0,25','0,1'],ans:'a'},
-  // B. LOGIKA VERBAL (11-20)
-  {no:11,section:'B',q:'Pilih kata yang TIDAK sejenis:',opts:['Apel','Mangga','Wortel','Jeruk'],ans:'c'},
-  {no:12,section:'B',q:'Pilih kata yang TIDAK sejenis:',opts:['Meja','Kursi','Lemari','Pisang'],ans:'d'},
-  {no:13,section:'B',q:'Dokter berhubungan dengan Rumah Sakit, seperti Guru berhubungan dengan:',opts:['Pasar','Sekolah','Kantor Polisi','Terminal'],ans:'b'},
-  {no:14,section:'B',q:'Panas berlawanan dengan:',opts:['Hangat','Dingin','Terang','Keras'],ans:'b'},
-  {no:15,section:'B',q:'Tinggi berlawanan dengan:',opts:['Besar','Kecil','Pendek','Panjang'],ans:'c'},
-  {no:16,section:'B',q:'Kunci : Pintu = Sendok : ___',opts:['Gelas','Piring','Makanan','Dapur'],ans:'b'},
-  {no:17,section:'B',q:'Mata : Melihat = Telinga : ___',opts:['Berjalan','Mendengar','Mencium','Menyentuh'],ans:'b'},
-  {no:18,section:'B',q:'Pilih kata yang paling dekat artinya dengan "cepat":',opts:['Lambat','Segera','Berat','Diam'],ans:'b'},
-  {no:19,section:'B',q:'Pilih kata yang paling dekat artinya dengan "rapi":',opts:['Berantakan','Bersih dan teratur','Kotor','Rusak'],ans:'b'},
-  {no:20,section:'B',q:'Jika seseorang "datang terlambat", artinya orang tersebut datang:',opts:['Sebelum waktu','Tepat waktu','Setelah waktu yang ditentukan','Tidak datang'],ans:'c'},
-  // C. PEMAHAMAN INSTRUKSI (21-26)
-  {no:21,section:'C',q:'Tulis angka 5, lalu tambahkan angka 2 di sebelah kanannya. Jawaban yang benar adalah:',opts:['25','52','7','10'],ans:'b'},
-  {no:22,section:'C',q:'Jika diminta memberi tanda silang pada huruf B, maka jawaban yang benar adalah:',opts:['A','X pada B','C','D'],ans:'b'},
-  {no:23,section:'C',q:'Pilih jawaban "Ya" jika kalimat berikut benar: "Matahari terbit pada pagi hari."',opts:['Ya','Tidak'],ans:'a'},
-  {no:24,section:'C',q:'Jika hari ini Selasa, maka dua hari lagi adalah:',opts:['Rabu','Kamis','Jumat','Sabtu'],ans:'b'},
-  {no:25,section:'C',q:'Jika instruksi berbunyi "Pilih angka terkecil", maka jawabannya adalah:',opts:['9','5','3','7'],ans:'c'},
-  {no:26,section:'C',q:'Bacalah kalimat berikut: "Ambil gelas merah di atas meja." Benda yang harus diambil adalah:',opts:['Piring merah','Gelas merah','Gelas biru','Meja merah'],ans:'b'},
-  // D. DAYA INGAT (27-30) - dengan instruksi khusus
-  {no:27,section:'D',q:'Manakah kata yang ada dalam daftar tadi?',opts:['Kunci','Mobil','Topi','Lampu'],ans:'a'},
-  {no:28,section:'D',q:'Manakah kata yang ada dalam daftar tadi?',opts:['Jeruk','Buku','Kursi','Jam'],ans:'b'},
-  {no:29,section:'D',q:'Manakah kata yang TIDAK ada dalam daftar tadi?',opts:['Meja','Hujan','Sepatu','Televisi'],ans:'d'},
-  {no:30,section:'D',q:'Berapa jumlah kata yang ada dalam daftar tadi?',opts:['4','5','6','7'],ans:'c'},
+  // A. KEMAMPUAN VERBAL (1-10)
+  {no:1,section:'A',q:'Sinonim kata CERMAT adalah...',opts:['Cepat','Teliti','Keras','Rumit','Berani'],ans:'b'},
+  {no:2,section:'A',q:'Antonim kata FLEKSIBEL adalah...',opts:['Luwes','Adaptif','Kaku','Ringan','Praktis'],ans:'c'},
+  {no:3,section:'A',q:'ARSITEK : BANGUNAN = ...',opts:['Dokter : Obat','Petani : Pasar','Sopir : Jalan','Penulis : Buku','Kasir : Uang'],ans:'d'},
+  {no:4,section:'A',q:'KOMPAS : ARAH = ...',opts:['Termometer : Suhu','Jam : Angka','Sepatu : Jalan','Peta : Kertas','Kaca : Cahaya'],ans:'a'},
+  {no:5,section:'A',q:'Sinonim kata IMPLISIT adalah...',opts:['Tersirat','Terbuka','Pasti','Berulang','Resmi'],ans:'a'},
+  {no:6,section:'A',q:'Manakah yang berbeda dari kelompok berikut?',opts:['Mawar','Melati','Anggrek','Tulip','Mangga'],ans:'e'},
+  {no:7,section:'A',q:'PERTANYAAN : JAWABAN = MASALAH : ...',opts:['Risiko','Rencana','Sebab','Data','Solusi'],ans:'e'},
+  {no:8,section:'A',q:'Antonim kata OBJEKTIF adalah...',opts:['Faktual','Netral','Subjektif','Logis','Akurat'],ans:'c'},
+  {no:9,section:'A',q:'MATA : MELIHAT = TELINGA : ...',opts:['Berbicara','Mendengar','Berjalan','Mencium','Menyentuh'],ans:'b'},
+  {no:10,section:'A',q:'KAMERA : FOTO = MIKROFON : ...',opts:['Musik','Kabel','Rekaman suara','Panggung','Gambar'],ans:'c'},
+  // B. KEMAMPUAN NUMERIK (11-20)
+  {no:11,section:'B',q:'Tentukan angka berikutnya: 3 – 6 – 12 – 24 – ...',opts:['36','40','42','48','54'],ans:'d'},
+  {no:12,section:'B',q:'Tentukan angka berikutnya: 2 – 5 – 10 – 17 – 26 – ...',opts:['35','37','39','41','43'],ans:'b'},
+  {no:13,section:'B',q:'Tentukan angka berikutnya: 81 – 27 – 9 – 3 – ...',opts:['1','0','1/3','2','6'],ans:'a'},
+  {no:14,section:'B',q:'Empat pekerja dapat menyelesaikan sebuah pekerjaan dalam 6 hari. Dengan produktivitas yang sama, berapa hari yang dibutuhkan 8 pekerja?',opts:['1 hari','2 hari','4 hari','6 hari','3 hari'],ans:'e'},
+  {no:15,section:'B',q:'Sebuah barang seharga Rp250.000 mendapatkan diskon 20%. Harga setelah diskon adalah...',opts:['Rp180.000','Rp200.000','Rp210.000','Rp220.000','Rp225.000'],ans:'b'},
+  {no:16,section:'B',q:'Perbandingan jumlah karyawan pria dan wanita adalah 3 : 5. Jika total karyawan 64 orang, jumlah karyawan pria adalah...',opts:['18','20','32','24','40'],ans:'d'},
+  {no:17,section:'B',q:'Tiga mesin menghasilkan 180 unit produk dalam 4 jam. Dengan kecepatan produksi yang sama, berapa unit yang dapat dihasilkan 5 mesin dalam 6 jam?',opts:['300','360','400','420','450'],ans:'e'},
+  {no:18,section:'B',q:'Nilai lima peserta adalah 72, 76, 80, 84, dan 88. Berapa nilai rata-ratanya?',opts:['80','79','81','82','78'],ans:'a'},
+  {no:19,section:'B',q:'Penjualan meningkat dari 120 unit menjadi 150 unit. Persentase kenaikannya adalah...',opts:['20%','22,5%','25%','30%','35%'],ans:'c'},
+  {no:20,section:'B',q:'Sebuah produk dibeli dengan harga Rp80.000 dan dijual Rp100.000. Persentase keuntungan terhadap harga beli adalah...',opts:['15%','20%','22,5%','30%','25%'],ans:'e'},
+  // C. LOGIKA & PENALARAN ANALITIS (21-30)
+  {no:21,section:'C',q:'Jika target penjualan tercapai, maka bonus dibayarkan. Bonus tidak dibayarkan. Kesimpulan paling logis adalah...',opts:['Target terlampaui','Target tidak tercapai','Bonus pasti ditunda','Target sebagian tercapai','Tidak ada hubungan'],ans:'b'},
+  {no:22,section:'C',q:'Semua analis adalah orang yang teliti. Tidak ada orang teliti yang ceroboh. Kesimpulan yang benar adalah...',opts:['Sebagian analis ceroboh','Semua orang teliti adalah analis','Sebagian orang ceroboh adalah analis','Tidak ada analis yang ceroboh','Semua orang yang tidak ceroboh adalah analis'],ans:'d'},
+  {no:23,section:'C',q:'Andi datang sebelum Budi. Budi datang sebelum Citra. Deni datang setelah Citra. Siapa yang datang paling awal?',opts:['Andi','Budi','Citra','Deni','Tidak dapat ditentukan'],ans:'a'},
+  {no:24,section:'C',q:'Empat pekerjaan harus dilakukan dengan ketentuan: S dilakukan sebelum P. P dilakukan sebelum Q. Q dilakukan sebelum R. Pekerjaan yang harus dilakukan paling awal adalah...',opts:['P','Q','S','R','Tidak dapat diketahui'],ans:'c'},
+  {no:25,section:'C',q:'Jika nilai setiap huruf mengikuti posisi alfabet: A=1, B=2, C=3, dst. maka CAT = 24. Nilai BAT adalah...',opts:['21','22','24','25','23'],ans:'e'},
+  {no:26,section:'C',q:'Tentukan huruf berikutnya: A – C – F – J – O – ...',opts:['T','U','V','W','X'],ans:'b'},
+  {no:27,section:'C',q:'Perhatikan pola berikut: Segitiga → Persegi → Pentagon → Heksagon → ... Bentuk berikutnya adalah...',opts:['Lingkaran','Oktagon','Heptagon','Nonagon','Dekagon'],ans:'c'},
+  {no:28,section:'C',q:'Tidak ada karyawan kontrak yang menjadi manajer. Sebagian supervisor adalah manajer. Kesimpulan yang benar adalah...',opts:['Semua supervisor adalah karyawan kontrak','Semua manajer adalah supervisor','Sebagian karyawan kontrak adalah supervisor','Sebagian supervisor bukan karyawan kontrak','Tidak ada supervisor yang menjadi manajer'],ans:'d'},
+  {no:29,section:'C',q:'Perhatikan pola berikut: 3→10, 5→26, 7→50. Jika pola yang sama digunakan, maka 9→...',opts:['82','80','81','84','90'],ans:'a'},
+  {no:30,section:'C',q:'Empat orang berdiri dalam satu baris. Seno berada di kiri Lina. Lina berada di kiri Maya. Riko berada di kanan Maya. Urutan dari kiri ke kanan adalah...',opts:['Lina – Seno – Maya – Riko','Seno – Maya – Lina – Riko','Seno – Lina – Maya – Riko','Maya – Lina – Seno – Riko','Riko – Maya – Lina – Seno'],ans:'c'},
 ];
-const TK_SECTIONS = {A:'Logika Angka',B:'Logika Verbal',C:'Pemahaman Instruksi',D:'Daya Ingat Sederhana'};
-const TK_SEC_RANGE = {A:[1,10],B:[11,20],C:[21,26],D:[27,30]};
+const TK_SECTIONS = {A:'Kemampuan Verbal',B:'Kemampuan Numerik',C:'Logika & Penalaran Analitis'};
+const TK_SEC_RANGE = {A:[1,10],B:[11,20],C:[21,30]};
 
 function tkScoreCalc(answers) {
-  let total=0, secScores={A:0,B:0,C:0,D:0};
+  let total=0, secScores={A:0,B:0,C:0};
   TK_QUESTIONS.forEach(q=>{
     if(answers[q.no]===q.ans){ total++; secScores[q.section]++; }
   });
@@ -1135,11 +1129,10 @@ function tkCategory(total) {
   if(total>=21) return {label:'Baik',cls:'bg-blue'};
   if(total>=16) return {label:'Cukup',cls:'bg-orange'};
   if(total>=11) return {label:'Kurang',cls:'bg-red2'};
-  return {label:'Sangat Kurang',cls:'bg-red2'};return {label:'Sangat Kurang',cls:'bg-red2'};
+  return {label:'Sangat Kurang',cls:'bg-red2'};
 }
 function tkSectionCat(sec, score) {
-  const max={A:10,B:10,C:6,D:4};
-  const pct=score/max[sec];
+  const pct=score/10;
   if(pct>=0.8) return 'Sangat Baik';
   if(pct>=0.5) return 'Cukup Baik';
   return 'Perlu Perhatian';
@@ -1148,28 +1141,31 @@ function tkNarr(total, secScores) {
   const cat=tkCategory(total);
   let n=`Berdasarkan hasil tes kognitif, ybs memperoleh skor total <strong>${total}/30</strong> yang termasuk kategori <strong>${cat.label}</strong>. `;
   const parts=[];
-  if(secScores.A>=8) parts.push('kemampuan logika angka yang sangat baik');
-  else if(secScores.A>=5) parts.push('kemampuan logika angka yang cukup baik');
-  else parts.push('kemampuan logika angka yang perlu ditingkatkan');
-  if(secScores.B>=8) parts.push('pemahaman verbal yang sangat baik');
-  else if(secScores.B>=5) parts.push('pemahaman verbal yang cukup');
-  else parts.push('pemahaman verbal yang perlu perhatian');
-  if(secScores.C>=5) parts.push('kemampuan mengikuti instruksi yang baik');
-  else if(secScores.C>=3) parts.push('kemampuan mengikuti instruksi yang cukup');
-  else parts.push('kemampuan mengikuti instruksi yang perlu supervisi');
-  if(secScores.D>=3) parts.push('daya ingat jangka pendek yang baik');
-  else parts.push('daya ingat jangka pendek yang perlu perhatian');
+  const A=secScores.A||0, B=secScores.B||0, C=secScores.C||0;
+  // Deteksi format lama (4 seksi A=Logika Angka, B=Verbal, C=Instruksi, D=Daya Ingat)
+  const isLegacy = secScores.D !== undefined && secScores.D !== null;
+  if(isLegacy){
+    parts.push(A>=8?'kemampuan logika angka yang sangat baik':A>=5?'kemampuan logika angka yang cukup baik':'kemampuan logika angka yang perlu ditingkatkan');
+    parts.push(B>=8?'pemahaman verbal yang sangat baik':B>=5?'pemahaman verbal yang cukup':'pemahaman verbal yang perlu perhatian');
+    const C_old=secScores.C||0;
+    parts.push(C_old>=5?'kemampuan mengikuti instruksi yang baik':C_old>=3?'kemampuan mengikuti instruksi yang cukup':'kemampuan mengikuti instruksi yang perlu supervisi');
+    const D=secScores.D||0;
+    parts.push(D>=3?'daya ingat jangka pendek yang baik':'daya ingat jangka pendek yang perlu perhatian');
+  } else {
+    parts.push(A>=8?'kemampuan verbal yang sangat baik':A>=5?'kemampuan verbal yang cukup':'kemampuan verbal yang perlu ditingkatkan');
+    parts.push(B>=8?'kemampuan numerik yang sangat baik':B>=5?'kemampuan numerik yang cukup':'kemampuan numerik yang perlu perhatian');
+    parts.push(C>=8?'kemampuan logika & penalaran analitis yang sangat baik':C>=5?'kemampuan logika & penalaran yang cukup baik':'kemampuan logika & penalaran yang perlu dikembangkan');
+  }
   n+=`Ybs menunjukkan ${parts.join(', ')}.`;
   return n;
 }
 
+// Legacy state fields retained for older in-progress snapshots.
+let tkMemoryPhase='memorize', tkMemorySecondsLeft=30, tkMemoryTimer=null;
 let tkAnswers = {};
 let tkPage = 0;
 const TK_PER_PAGE = 5;
 
-let tkMemoryPhase = 'memorize'; // 'memorize' | 'answer' — untuk section D
-let tkMemoryTimer = null;
-let tkMemorySecondsLeft = 30;
 
 function rCIFT() {
   const start = tkPage * TK_PER_PAGE;
@@ -1177,11 +1173,11 @@ function rCIFT() {
   const totalPages = Math.ceil(30/TK_PER_PAGE);
   const isLastPage = end >= 30;
   const answered = Object.keys(tkAnswers).length;
-  const isMemorySection = start < 30 && end > 26; // halaman section D (soal 27-30)
+  // Section D (Daya Ingat) sudah dihapus — tidak ada halaman khusus menghafal
 
-  const sections = [{id:'A',label:'A. Logika Angka',range:[1,10]},{id:'B',label:'B. Logika Verbal',range:[11,20]},{id:'C',label:'C. Pemahaman Instruksi',range:[21,26]},{id:'D',label:'D. Daya Ingat Sederhana',range:[27,30]}];
+  const sections = [{id:'A',label:'A. Verbal',range:[1,10]},{id:'B',label:'B. Numerik',range:[11,20]},{id:'C',label:'C. Logika',range:[21,30]}];
 
-  const secPages = {A:0,B:2,C:4,D:5};
+  const secPages = {A:0,B:2,C:4};
   let tabsHtml = '<div style="display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap">';
   sections.forEach(s=>{
     const done = TK_QUESTIONS.filter(q=>q.section===s.id&&tkAnswers[q.no]).length;
@@ -1192,44 +1188,13 @@ function rCIFT() {
   });
   tabsHtml+='</div>';
 
-  // ── HALAMAN KHUSUS: Section D (Daya Ingat) ──
-  if(isMemorySection){
-    // Fase MENGHAFAL: tampilkan kata + countdown, soal disembunyikan
-    if(tkMemoryPhase === 'memorize'){
-      return `<div class="card">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-          <div class="card-title" style="margin-bottom:0"><span class="ct-dot"></span>Tes Kognitif — Daya Ingat Sederhana</div>
-          <div style="font-size:12px;color:var(--muted)">${answered}/30</div>
-        </div>
-        <div style="height:6px;background:var(--paper2);border-radius:99px;margin-bottom:14px;overflow:hidden">
-          <div id="tk-prog" style="height:100%;background:var(--green);width:${answered/30*100}%;border-radius:99px;transition:width 0.3s"></div>
-        </div>
-        ${tabsHtml}
-        <div style="text-align:center;padding:30px 16px;background:#fff3cd;border:1px solid #ffc107;border-radius:10px">
-          <div style="font-size:13px;font-weight:700;color:#856404;margin-bottom:14px">📌 HAFALKAN daftar kata di bawah ini.<br>Soal akan muncul otomatis setelah waktu habis.</div>
-          <div style="font-size:26px;font-weight:700;letter-spacing:3px;color:var(--ink);margin:18px 0;line-height:1.6">
-            Kunci &nbsp;·&nbsp; Meja &nbsp;·&nbsp; Hujan<br>Buku &nbsp;·&nbsp; Pisang &nbsp;·&nbsp; Sepatu
-          </div>
-          <div style="font-size:42px;font-weight:700;color:var(--red);margin-top:10px" id="tk-mem-countdown">${tkMemorySecondsLeft}</div>
-          <div style="font-size:12px;color:#856404;margin-top:4px">detik tersisa</div>
-        </div>
-      </div>
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:12px">
-        <button class="btn btn-ghost" onclick="prevStep()">← Kembali</button>
-        <span style="font-size:12px;color:var(--muted)">Hal. ${tkPage+1}/${totalPages}</span>
-        <span style="font-size:12px;color:var(--muted)">Mohon tunggu...</span>
-      </div>`;
-    }
-    // Fase MENJAWAB: kata sudah hilang, tampilkan soal 27-30 saja
-  }
-
   let questionsHtml = '';
   for(let i=start;i<end;i++){
     const q = TK_QUESTIONS[i];
     if(!q) break;
     const ans = tkAnswers[q.no];
     const isAnswered = !!ans;
-    const optLetters = ['a','b','c','d'];
+    const optLetters = ['a','b','c','d','e'];
     questionsHtml+=`<div id="tkq-${q.no}" style="background:${isAnswered?'#f0fdf4':'white'};border:1.5px solid ${isAnswered?'var(--green)':'var(--border)'};border-radius:10px;padding:14px;margin-bottom:12px">
       <div style="font-size:10px;font-weight:700;color:var(--muted);margin-bottom:6px">Soal ${q.no} — ${TK_SECTIONS[q.section]}</div>
       <div style="font-size:14px;font-weight:600;color:var(--ink);margin-bottom:10px;line-height:1.5">${q.q.replace(/\n/g,'<br>')}</div>
@@ -1246,7 +1211,6 @@ function rCIFT() {
     </div>`;
   }
 
-  const memoryDoneNotice = isMemorySection ? `<div class="alert alert-ok" style="margin-bottom:12px">⏱ Waktu menghafal sudah selesai. Jawablah soal di bawah berdasarkan ingatan Anda, tanpa melihat kembali daftar kata.</div>` : '';
 
   return `<div class="card">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
@@ -1258,7 +1222,6 @@ function rCIFT() {
     </div>
     ${tabsHtml}
     <div class="alert alert-info" style="margin-bottom:12px">Pilih <strong>satu</strong> jawaban yang paling tepat untuk setiap soal. Waktu: 25–35 menit.</div>
-    ${memoryDoneNotice}
     ${questionsHtml}
   </div>
   <div style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;flex-wrap:wrap;gap:10px">
@@ -1266,22 +1229,6 @@ function rCIFT() {
     <span style="font-size:12px;color:var(--muted)">Hal. ${tkPage+1}/${totalPages}</span>
     <button class="btn btn-ink" onclick="tkNext(${isLastPage})">${isLastPage?'Selesai →':'Berikutnya →'}</button>
   </div>`;
-}
-
-function startTkMemoryCountdown(){
-  if(tkMemoryTimer) clearInterval(tkMemoryTimer);
-  tkMemorySecondsLeft = 30;
-  tkMemoryTimer = setInterval(function(){
-    tkMemorySecondsLeft--;
-    const el = document.getElementById('tk-mem-countdown');
-    if(el) el.textContent = tkMemorySecondsLeft;
-    if(tkMemorySecondsLeft <= 0){
-      clearInterval(tkMemoryTimer);
-      tkMemoryTimer = null;
-      tkMemoryPhase = 'answer';
-      renderTesStep();
-    }
-  }, 1000);
 }
 
 function setTkAns(no, letter) {
@@ -1307,13 +1254,6 @@ function setTkAns(no, letter) {
 }
 function tkGoPage(p){
   tkPage=p;
-  const start=p*TK_PER_PAGE,end=Math.min(start+TK_PER_PAGE,30);
-  const isMemorySection = start<30 && end>26;
-  // Jika kandidat belum pernah menjawab soal 27-30 dan masuk ke section ini, reset ke fase menghafal
-  if(isMemorySection && tkAnswers[27]===undefined && tkAnswers[28]===undefined && tkAnswers[29]===undefined && tkAnswers[30]===undefined){
-    tkMemoryPhase='memorize';
-  }
-  if(tkMemoryTimer){clearInterval(tkMemoryTimer);tkMemoryTimer=null;}
   renderTesStep();
 }
 function tkPrev(){if(tkPage>0){tkPage--;renderTesStep();}}
