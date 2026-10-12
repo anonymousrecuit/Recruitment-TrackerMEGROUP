@@ -193,21 +193,26 @@
     const riskA=a>=9?'Rendah':a>=-4?'Sedang':'Tinggi';
     const riskB=b>=6?'Rendah':b>=-3?'Sedang':'Tinggi';
     const fake=cc<=14?'Rendah':cc<=23?'Sedang':'Tinggi';
-    const overall=(riskA==='Tinggi'||riskB==='Tinggi')?'Perlu Perhatian':(riskA==='Sedang'||riskB==='Sedang')?'Perlu Validasi':'Indikasi Baik';
-    const trust=fake==='Tinggi'?'Perlu divalidasi':fake==='Sedang'?'Cukup dapat dipercaya':'Cukup dapat dipercaya';
-    const meaning=overall==='Perlu Perhatian'
-      ?'Terdapat indikasi risiko pada sikap integritas atau cara mengambil keputusan dalam situasi kerja. Hasil ini bukan vonis ketidakjujuran dan perlu dikonfirmasi melalui wawancara berbasis perilaku.'
-      :overall==='Perlu Validasi'
-      ?'Tidak terlihat risiko integritas yang sangat kuat, tetapi masih ada area yang perlu dikonfirmasi melalui wawancara dan referensi kerja.'
-      :'Respons kandidat secara umum menunjukkan indikasi integritas yang baik pada instrumen ini. Tetap gunakan hasil ini bersama data seleksi lainnya.';
-    const action=(riskA==='Tinggi'||riskB==='Tinggi')
-      ?'Dalami contoh nyata tentang kejujuran administratif, kepatuhan SOP, penanganan kas/stok atau aset, pelaporan kesalahan, dan respons ketika melihat pelanggaran.'
-      :'Validasi konsistensi perilaku melalui pertanyaan situasional dan contoh pengalaman kerja nyata.';
-    return{riskA,riskB,fake,overall,trust,meaning,action,a,b,cc};
+    const level=(riskA==='Tinggi'||riskB==='Tinggi')?'serious':(riskA==='Sedang'||riskB==='Sedang')?'deepen':'clear';
+    const overall=level==='serious'?'Perlu Perhatian Serius':level==='deepen'?'Perlu Pendalaman':'Tidak Ada Indikasi Risiko Signifikan';
+    const finding=level==='serious'
+      ?'Jawaban kandidat menunjukkan indikasi risiko tinggi pada integritas kerja. Terdapat respons yang perlu diperhatikan terkait kejujuran, kepatuhan terhadap aturan, tanggung jawab, atau cara mengambil keputusan dalam situasi sensitif di tempat kerja.'
+      :level==='deepen'
+      ?'Terdapat beberapa respons yang perlu dikonfirmasi lebih lanjut terkait integritas kerja dan cara kandidat mengambil keputusan dalam situasi kerja.'
+      :'Tidak ditemukan sinyal risiko integritas yang menonjol dari respons kandidat pada instrumen ini.';
+    const usable=fake==='Tinggi'
+      ?'Perlu kehati-hatian. Terdapat indikasi kandidat cenderung menampilkan jawaban yang terlalu ideal, sehingga hasil integritas perlu divalidasi lebih kuat melalui wawancara dan sumber informasi lain.'
+      :'Ya, sebagai bahan evaluasi awal. Tidak ditemukan indikasi kuat bahwa kandidat berusaha membuat jawabannya terlihat lebih baik dari kondisi sebenarnya. Karena itu, sinyal yang muncul layak ditindaklanjuti dalam proses seleksi.';
+    const action=level==='serious'
+      ?'Wajib didalami saat interview. Minta contoh kejadian nyata tentang kejujuran administratif, kepatuhan SOP, kesalahan kerja, selisih kas/stok, penggunaan aset perusahaan, serta tindakan kandidat ketika mengetahui pelanggaran.'
+      :level==='deepen'
+      ?'Dalami saat interview dengan pertanyaan situasional dan contoh pengalaman nyata mengenai kepatuhan aturan, tanggung jawab, kejujuran, dan penanganan kesalahan.'
+      :'Tetap lakukan validasi normal saat interview dan gunakan hasil ini bersama hasil seleksi lainnya.';
+    return{riskA,riskB,fake,level,overall,finding,usable,action,a,b,cc};
   }
   function psychResultCard(r){
     if(r?.test_code==='INTEGRITY'){
-      const x=integrityHrView(r);if(x)return `<section class="rounded-2xl border border-slate-200 bg-white p-4"><div class="text-[11px] uppercase tracking-wide text-slate-400">TES INTEGRITAS</div><div class="mt-1 text-base font-bold text-slate-900">${esc(x.overall)}</div><div class="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-2"><div class="rounded-lg bg-slate-50 p-3"><div class="text-[10px] uppercase text-slate-400">Risiko Integritas</div><div class="mt-1 text-sm font-semibold">${esc(x.riskA)}</div></div><div class="rounded-lg bg-slate-50 p-3"><div class="text-[10px] uppercase text-slate-400">Penilaian Situasional</div><div class="mt-1 text-sm font-semibold">${esc(x.riskB)}</div></div><div class="rounded-lg bg-slate-50 p-3"><div class="text-[10px] uppercase text-slate-400">Kualitas Jawaban</div><div class="mt-1 text-sm font-semibold">${esc(x.trust)}</div><div class="mt-1 text-[10px] text-slate-400">Indikasi terlalu mempercantik jawaban: ${esc(x.fake)}</div></div></div><p class="mt-3 text-sm leading-6 text-slate-600">${esc(x.meaning)}</p><div class="mt-3 rounded-lg border border-amber-100 bg-amber-50 p-3"><div class="text-[10px] uppercase font-semibold text-amber-700">Saran untuk HR</div><div class="mt-1 text-xs leading-5 text-slate-700">${esc(x.action)}</div></div><details class="mt-3"><summary class="cursor-pointer text-xs font-semibold text-blue-700">Lihat detail skor teknis</summary><div class="mt-2 rounded-lg border border-slate-100 bg-slate-50 p-3 text-xs leading-6 text-slate-600">Skor mentah: A ${x.a} · B ${x.b} · C ${x.cc}. A menggambarkan indikator sikap integritas, B penilaian situasional, dan C skala deteksi kecenderungan menampilkan diri terlalu ideal. Skor mentah dipertahankan untuk audit dan tidak digunakan sendirian sebagai keputusan akhir kandidat.</div></details></section>`;
+      const x=integrityHrView(r);if(x){const badge=x.level==='serious'?'🔴':x.level==='deepen'?'🟠':'🟢';return `<section class="rounded-2xl border border-slate-200 bg-white p-4"><div class="text-[11px] uppercase tracking-wide text-slate-400">TES INTEGRITAS</div><div class="mt-1 text-lg font-bold text-slate-900">${badge} ${esc(x.overall)}</div><div class="mt-4"><div class="text-xs font-bold text-slate-800">Apa yang ditemukan?</div><p class="mt-1 text-sm leading-6 text-slate-600">${esc(x.finding)}</p></div><div class="mt-4"><div class="text-xs font-bold text-slate-800">Apakah hasil ini bisa digunakan?</div><p class="mt-1 text-sm leading-6 text-slate-600">${esc(x.usable)}</p></div><div class="mt-4 rounded-xl border border-amber-100 bg-amber-50 p-3"><div class="text-xs font-bold text-amber-800">Apa yang harus dilakukan HR?</div><p class="mt-1 text-sm leading-6 text-slate-700">${esc(x.action)}</p></div><div class="mt-4 rounded-lg bg-slate-50 p-3 text-xs leading-5 text-slate-500"><b>Catatan:</b> Hasil ini tidak membuktikan kandidat jujur atau tidak jujur dan tidak boleh menjadi satu-satunya dasar keputusan. Gunakan bersama interview, referensi kerja, dan hasil seleksi lainnya.</div><details class="mt-3"><summary class="cursor-pointer text-xs font-semibold text-blue-700">Lihat data teknis</summary><div class="mt-2 rounded-lg border border-slate-100 bg-slate-50 p-3 text-xs leading-6 text-slate-600"><div>Risiko sikap: <b>${esc(x.riskA)}</b> · Situasional: <b>${esc(x.riskB)}</b> · Indikasi respons terlalu ideal: <b>${esc(x.fake)}</b></div><div class="mt-1 text-slate-400">Skor mentah: A ${x.a} · B ${x.b} · C ${x.cc}. Data teknis dipertahankan untuk audit.</div></div></details></section>`;}
     }
     const clean=psychPlainText(r?.interpretation), val=resultValue(r);
     return `<section class="rounded-2xl border border-slate-200 bg-white p-4"><div class="flex items-start justify-between gap-3"><div><div class="text-[11px] uppercase tracking-wide text-slate-400">${esc(testLabel(r?.test_code))}</div><div class="mt-1 text-base font-bold text-slate-900">${esc(val)}</div></div></div>${clean?`<p class="mt-3 text-sm leading-6 text-slate-600">${esc(psychShort(clean,320))}</p><details class="mt-3"><summary class="cursor-pointer text-xs font-semibold text-blue-700">Lihat interpretasi lengkap</summary><div class="mt-2 rounded-lg border border-slate-100 bg-slate-50 p-3 text-xs leading-6 text-slate-600">${esc(clean)}</div></details>`:''}</section>`;
