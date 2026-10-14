@@ -896,6 +896,7 @@ function candidateFromSession(data){
     company: data.company_name || '-',
     brand: data.brand || '',
     positionId: data.position_id || null,
+    jobFitSnapshot: data.job_fit_snapshot || null,
     tests: normalizeTestPackage(data.tests),
     status: data.status || '',
     expiresAt: data.expires_at || null,
@@ -1410,7 +1411,7 @@ async function finalizeTes(){
   if(hasINTEG) ig=scoreIntegrity(tesState.integAAnswers,tesState.integBAnswers,tesState.integCAnswers);
   const cognitiveScore=tesState.tkTotal!=null?tesState.tkTotal:null;
   const integrityRisk=ig?integRiskLabel(ig.totalA,ig.totalB):null;
-  const recEval=evaluateRecommendation(cognitiveScore,avg,pa,tesState.candidate.position,integrityRisk);
+  const recEval=evaluateRecommendation(cognitiveScore,avg,pa,tesState.candidate.position,integrityRisk,tesState.candidate.jobFitSnapshot);
   const rec=recEval.label;
   const cognitiveDetail=tesState.tkSecScores||{};
   const cognitiveInterpretation=hasCIFT&&cognitiveScore!=null?stripHtmlText(tkNarr(cognitiveScore,cognitiveDetail)) : '';
@@ -1422,7 +1423,8 @@ async function finalizeTes(){
   const integrityInterpretation=ig?stripHtmlText(integNarr(ig.totalA,ig.totalB,ig.totalC)):'';
   const overallInterpretation=stripHtmlText(buildConc(avg,rec,tesState.candidate.position,cognitiveScore,recEval.reason,recEval.benchmark));
 
-  const jobFitProfile=buildInventoryControlJobFit(tesState.candidate.positionId,cognitiveScore,ps,ds||{});
+  const jobFitProfile=buildInventoryControlJobFit(tesState.candidate.positionId,cognitiveScore,ps,ds||{}) ||
+    buildDynamicJobFit(tesState.candidate.jobFitSnapshot,cognitiveScore,ps,ds||{},mr,ig,cognitiveDetail);
   const resultPayload={
     assessmentPositionId:tesState.candidate.positionId||null,
     jobFitProfile,
@@ -1533,6 +1535,103 @@ function positionCognitiveBenchmark(positionName){
   return 10;
 }
 
+function buildDynamicJobFit(snapshot,cognitiveScore,papiScores,discScores,msdtResult,integrityResult,cognitiveDetail){
+  if(!snapshot || snapshot.configurationStatus!=='Aktif' || snapshot.positionId==='MEG-GUD-002') return null;
+  const competencies=Array.isArray(snapshot.competencies)?snapshot.competencies:[];
+  if(!competencies.length) return null;
+
+  const p=papiScores||{}, d=discScores||{}, detail=cognitiveDetail||{};
+  const papiGroupAvg=getPapiGS(p).avg||{};
+  const topDisc=Object.entries(d).sort((a,b)=>Number(b[1])-Number(a[1])).slice(0,2).map(x=>x[0]);
+  const benchmark=Number(snapshot.cognitiveBenchmark);
+  const cog=Number(cognitiveScore);
+
+  const ciftStatus=()=>{
+    if(!Number.isFinite(cog) || !Number.isFinite(benchmark)) return 'Perlu Validasi';
+    return cog>=benchmark?'Indikasi Mendukung':'Perlu Validasi';
+  };
+  const papiStatus=(groups)=>{
+    const vals=(groups||[]).map(g=>Number(papiGroupAvg[g])).filter(Number.isFinite);
+    if(!vals.length) return 'Perlu Validasi';
+    const a=vals.reduce((s,v)=>s+v,0)/vals.length;
+    return a>=5?'Indikasi Mendukung':a<3?'Area Perhatian':'Perlu Validasi';
+  };
+  const discStatus=(dims)=>{
+    if(!topDisc.length || !(dims||[]).length) return 'Perlu Validasi';
+    return dims.some(x=>topDisc.includes(x))?'Indikasi Mendukung':'Perlu Validasi';
+  };
+  const msdtStatus=()=>{
+    const dom=msdtResult?.dominant;
+    if(!dom) return 'Perlu Validasi';
+    return dom==='C'?'Area Perhatian':'Indikasi Mendukung';
+  };
+  const integrityStatus=()=>{
+    if(!integrityResult) return 'Perlu Validasi';
+    const cats=integCat(integrityResult.totalA,integrityResult.totalB,integrityResult.totalC);
+    if(cats.catA==='Tinggi'||cats.catB==='Tinggi') return 'Area Perhatian';
+    if(cats.catA==='Sedang'||cats.catB==='Sedang'||cats.catC==='Tinggi') return 'Perlu Validasi';
+    return 'Indikasi Mendukung';
+  };
+  const evalEvidence=(e)=>{
+    if(!e||!e.test) return {status:'Perlu Validasi',text:'Bukti psikotes belum dikonfigurasi.'};
+    if(e.test==='CIFT'){
+      const aspectLabel=Array.isArray(e.aspects)&&e.aspects.length?' pada aspek '+e.aspects.join('/'):'';
+      return {status:ciftStatus(),text:'Tes Kognitif '+(Number.isFinite(cog)?cog+'/30':'belum tersedia')+(Number.isFinite(benchmark)?' · benchmark '+benchmark+'/30':'')+aspectLabel+'.'};
+    }
+    if(e.test==='PAPIKOSTIK'){
+      const groups=e.groups||[];
+      const vals=groups.map(g=>Number(papiGroupAvg[g])).filter(Number.isFinite);
+      const txt=groups.map(g=>g+' '+(Number.isFinite(Number(papiGroupAvg[g]))?Number(papiGroupAvg[g]).toFixed(1):'—')).join(' · ');
+      return {status:papiStatus(groups),text:'PAPI: '+(txt||'data belum tersedia')+'.'};
+    }
+    if(e.test==='DISC'){
+      return {status:discStatus(e.dimensions||[]),text:'DISC top profile: '+(topDisc.join('/')||'belum tersedia')+'; indikator relevan: '+((e.dimensions||[]).join('/')||'—')+'.'};
+    }
+    if(e.test==='MSDT'){
+      const dom=msdtResult?.dominant, name=dom&&MT[dom]?MT[dom].name:dom;
+      return {status:msdtStatus(),text:'MSDT: '+(name||'belum tersedia')+'.'};
+    }
+    if(e.test==='INTEGRITY'){
+      const cats=integrityResult?integCat(integrityResult.totalA,integrityResult.totalB,integrityResult.totalC):null;
+      return {status:integrityStatus(),text:cats?'Integritas: risiko sikap '+cats.catA+', situasional '+cats.catB+', respons terlalu ideal '+cats.catC+'.':'Integritas belum tersedia.'};
+    }
+    return {status:'Perlu Validasi',text:e.test+' digunakan sebagai bukti pendukung.'};
+  };
+  const combine=(evaluated)=>{
+    const primary=evaluated.filter(x=>x.role==='primary');
+    const base=primary.length?primary:evaluated;
+    if(base.some(x=>x.status==='Area Perhatian')) return 'Area Perhatian';
+    if(base.length && base.every(x=>x.status==='Indikasi Mendukung')){
+      return evaluated.some(x=>x.status==='Area Perhatian')?'Perlu Validasi':'Indikasi Mendukung';
+    }
+    return 'Perlu Validasi';
+  };
+
+  const out=competencies.map(k=>{
+    const rules=Array.isArray(k.evidence)?k.evidence:[];
+    const evaluated=rules.map(e=>({...evalEvidence(e),role:e.role||'support'}));
+    return {
+      id:k.competencyId,
+      name:k.name,
+      weight:Number(k.weight||0),
+      status:combine(evaluated),
+      evidence:evaluated.map(x=>x.text).join(' '),
+      validationFocus:k.validationFocus||'Validasi kompetensi melalui interview dan bukti pengalaman kerja.',
+      interviewQuestions:Array.isArray(k.interviewQuestions)?k.interviewQuestions:[]
+    };
+  });
+
+  return {
+    version:snapshot.profileVersion||'JPF-V1',
+    positionId:snapshot.positionId,
+    positionName:snapshot.positionName||'',
+    advisoryOnly:true,
+    cognitiveBenchmark:Number.isFinite(benchmark)?benchmark:null,
+    configurationStatus:snapshot.configurationStatus,
+    competencies:out
+  };
+}
+
 function buildInventoryControlJobFit(positionId,cognitiveScore,papiScores,discScores){
   if(positionId!=='MEG-GUD-002')return null;
   const p=papiScores||{},d=discScores||{},vals=Object.values(p).map(Number).filter(Number.isFinite).sort((a,b)=>a-b);
@@ -1562,13 +1661,16 @@ function computePapiBand(avg,pa){
   return {band:'low',score:score};
 }
 
-function evaluateRecommendation(cognitiveScore,avg,pa,positionName,integrityRisk){
-  const benchmark=positionCognitiveBenchmark(positionName);
+function evaluateRecommendation(cognitiveScore,avg,pa,positionName,integrityRisk,jobFitSnapshot){
+  const snapBenchmark=Number(jobFitSnapshot?.cognitiveBenchmark);
+  const benchmark=Number.isFinite(snapBenchmark)?snapBenchmark:positionCognitiveBenchmark(positionName);
+  const hardMinRaw=jobFitSnapshot?.cognitiveMin;
+  const hardMin=hardMinRaw==null?null:Number(hardMinRaw);
   const c=(cognitiveScore==null||cognitiveScore==='')?null:Number(cognitiveScore);
   const papi=computePapiBand(avg||{},Number(pa||0));
 
-  if(c!==null && Number.isFinite(c) && c<10){
-    return {label:'Tidak Disarankan',level:'block',benchmark:benchmark,papiScore:papi.score,reason:'Skor kognitif berada di bawah batas minimum 10/30. Hasil kepribadian tidak digunakan untuk menutup risiko kognitif yang kritis.'};
+  if(c!==null && Number.isFinite(c) && Number.isFinite(hardMin) && c<hardMin){
+    return {label:'Tidak Disarankan',level:'block',benchmark:benchmark,papiScore:papi.score,reason:'Skor kognitif berada di bawah batas minimum '+hardMin+'/30 untuk profil jabatan ini. Hasil kepribadian tidak digunakan untuk menutup risiko kognitif yang kritis.'};
   }
   if(integrityRisk==='Risiko Tinggi') {
     return {label:'Perlu Review HR',level:'review',benchmark:benchmark,papiScore:papi.score,reason:'Terdapat sinyal risiko integritas tinggi yang wajib divalidasi HR melalui wawancara perilaku dan pemeriksaan bukti pendukung.'};
