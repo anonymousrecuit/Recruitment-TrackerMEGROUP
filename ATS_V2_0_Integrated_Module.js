@@ -384,7 +384,14 @@
   const __v262ReadSummary=async function(appId){
     const raw=await psychSummary(appId);
     if(!raw?.exists)return {raw:raw,completed:null};
-    return {raw:raw,completed:__v262Completed(raw)};
+    const completed=__v262Completed(raw);
+    if(!completed)return {raw:raw,completed:null};
+    const session=completed.session||{};
+    const latestNo=Number(raw.session?.attempt_no||0);
+    const selectedNo=Number(session.attempt_no||0);
+    if(session.status!=='Selesai'||!session.completed_at||!selectedNo||(latestNo&&selectedNo>latestNo))
+      throw new Error('Data attempt selesai tidak valid. Laporan dibatalkan.');
+    return {raw:raw,completed:completed};
   };
   viewPsychResult=async function(appId){
     try{
