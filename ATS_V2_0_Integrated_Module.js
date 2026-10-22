@@ -329,6 +329,8 @@
     const noteLines=doc.splitTextToSize(note,CW-10),noteH=Math.max(14,noteLines.length*3.7+7);ensure(noteH+4);y+=2;
     doc.setFillColor(255,251,235);doc.setDrawColor(253,230,138);doc.roundedRect(M,y,CW,noteH,2,2,'FD');doc.setTextColor(146,64,14);noteLines.forEach((t,i)=>doc.text(t,M+5,y+5+i*3.7));
     footer();
+    // Preserve the pre-existing Inventory Control assessment appendix when applicable.
+    appendInventoryJobFitPdf(doc,summary);
     return doc;
   }
   async function downloadPsychPdf(appId){try{const s=await psychSummary(appId);const doc=buildPsychPdf(s,appId);if(!doc)return showToast('jsPDF belum termuat','danger');doc.save(`Hasil_Psikotes_${safeFile(candById(appById(appId)?.candidate_id)?.candidate_name)}.pdf`);}catch(e){showToast('Gagal membuat PDF: '+e.message,'danger');}}
@@ -453,7 +455,8 @@
       const m=document.getElementById('modalContent');
       if(m)m.className='bg-white rounded-2xl shadow-2xl w-full max-w-5xl max-h-[92vh] overflow-y-auto';
       const resultCards=rows.length?rows.map(psychResultCard).join(''):'<div class="rounded-xl bg-slate-50 p-4 text-sm text-slate-500">Detail hasil per tes belum tersedia. Hanya kesimpulan keseluruhan yang tersimpan.</div>';
-      openModal('<div class="p-5 md:p-7"><div class="text-xs text-slate-400">HASIL PSIKOTES · RIWAYAT SELESAI</div><h3 class="mt-1 text-xl font-bold">Hasil Psikotes - Attempt '+esc(sess.attempt_no||1)+'</h3><p class="mt-1 text-xs text-slate-500">Selesai '+esc(fmt(sess.completed_at))+'</p><div class="mt-4 space-y-3">'+resultCards+'</div>'+((overall?.interpretation)?'<section class="mt-4 rounded-xl border border-blue-100 bg-blue-50 p-4"><h4 class="font-bold text-sm">Kesimpulan Keseluruhan</h4><p class="mt-2 text-sm leading-6 whitespace-pre-wrap">'+esc(overall.interpretation)+'</p></section>':'')+'<div class="mt-4 rounded-xl bg-slate-50 p-4 text-sm"><b>Rekomendasi:</b> '+esc(sess.engine_recommendation||overall?.recommendation||'—')+'</div><div class="text-right mt-5"><button class="px-4 py-2 rounded-lg border" onclick="closeModal()">Tutup</button></div></div>');
+      const inventoryDetail=inventoryJobFitHtml(s);
+      openModal('<div class="p-5 md:p-7"><div class="text-xs text-slate-400">HASIL PSIKOTES · RIWAYAT SELESAI</div><h3 class="mt-1 text-xl font-bold">Hasil Psikotes - Attempt '+esc(sess.attempt_no||1)+'</h3><p class="mt-1 text-xs text-slate-500">Selesai '+esc(fmt(sess.completed_at))+'</p><div class="mt-4 space-y-3">'+resultCards+'</div>'+inventoryDetail+((overall?.interpretation)?'<section class="mt-4 rounded-xl border border-blue-100 bg-blue-50 p-4"><h4 class="font-bold text-sm">Kesimpulan Keseluruhan</h4><p class="mt-2 text-sm leading-6 whitespace-pre-wrap">'+esc(overall.interpretation)+'</p></section>':'')+'<div class="mt-4 rounded-xl bg-slate-50 p-4 text-sm"><b>Rekomendasi:</b> '+esc(sess.engine_recommendation||overall?.recommendation||'—')+'</div><div class="text-right mt-5"><button class="px-4 py-2 rounded-lg border" onclick="closeModal()">Tutup</button></div></div>');
     }catch(e){showToast('Gagal membaca detail: '+(e.message||e),'danger');}
   };
   downloadPsychPdf=async function(appId){
