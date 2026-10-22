@@ -279,7 +279,7 @@
   async function savePsychReview(appId,decision){const notes=document.getElementById('v2PsychNotes')?.value?.trim()||null;const {error}=await sb.rpc('review_psychotest_result',{p_application_id:appId,p_decision:decision,p_hr_notes:notes});if(error)return showToast('Gagal simpan review: '+error.message,'danger');closeModal();await loadPsych(true);if(currentPage==='psychotests')renderPsych(false);injectPsychCard(appId);showToast('Keputusan psikotes: '+decision,'success');}
   async function advanceToInterviewHr(appId){await transitionStage(appId,'Interview HR');}
 
-  function buildPsychPdf(summary,appId){if(!window.jspdf?.jsPDF)return null;const app=appById(appId),c=candById(app?.candidate_id),p=posById(app?.position_id),co=coById(app?.company_id),sess=summary.session||{};const {jsPDF}=window.jspdf,doc=new jsPDF();let y=16;const line=(t,s=9,b=false)=>{doc.setFontSize(s);doc.setFont('helvetica',b?'bold':'normal');for(const z of doc.splitTextToSize(String(t??'—'),180)){if(y>282){doc.addPage();y=16;}doc.text(z,15,y);y+=5;}y+=1;};line('LAPORAN HASIL PSIKOTES',15,true);line(`${c?.candidate_name||'-'} · ${p?.position_name||'-'} · ${co?.brand||co?.company_name||'-'}`,10,true);line(`Application: ${appId} · Attempt: ${sess.attempt_no||1} · Selesai: ${fmt(sess.completed_at)}`);line(`Rekomendasi SiPsiko: ${sess.engine_recommendation||'—'} · Keputusan HR: ${sess.workflow_decision||'—'}`);line('HASIL PER TES',11,true);(summary.results||[]).filter(r=>r.test_code!=='OVERALL').forEach(r=>{line(`${testLabel(r.test_code)}: ${resultValue(r)}`,9,true);if(r.interpretation)line(r.interpretation,8);});const overall=(summary.results||[]).find(r=>r.test_code==='OVERALL');if(overall?.interpretation){line('INTERPRETASI KESELURUHAN',11,true);line(overall.interpretation);}if(sess.hr_notes){line('CATATAN HR',11,true);line(sess.hr_notes);}line('Keputusan workflow recruitment ditetapkan HR dan dipisahkan dari rekomendasi engine SiPsiko.',8);appendInventoryJobFitPdf(doc,summary);return doc;}
+  function buildPsychPdf(summary,appId){if(!window.jspdf?.jsPDF)return null;const app=appById(appId),c=candById(app?.candidate_id),p=posById(app?.position_id),co=coById(app?.company_id),sess=summary.session||{};const {jsPDF}=window.jspdf,doc=new jsPDF();let y=16;const line=(t,s=9,b=false)=>{doc.setFontSize(s);doc.setFont('helvetica',b?'bold':'normal');for(const z of doc.splitTextToSize(String(t??'—'),180)){if(y>282){doc.addPage();y=16;}doc.text(z,15,y);y+=5;}y+=1;};line('LAPORAN HASIL PSIKOTES',15,true);line(`${c?.candidate_name||'-'} · ${p?.position_name||'-'} · ${co?.brand||co?.company_name||'-'}`,10,true);line(`Application: ${appId} · Attempt: ${sess.attempt_no||1} · Selesai: ${fmt(sess.completed_at)}`);line(`Rekomendasi SiPsiko: ${sess.engine_recommendation||'—'} · Keputusan HR: ${sess.workflow_decision||'—'}`);line('HASIL PER TES',11,true);if(!(summary.results||[]).some(r=>r.test_code!=='OVERALL'))line('Detail hasil per tes belum tersedia. Hanya kesimpulan keseluruhan yang tersimpan.',8);(summary.results||[]).filter(r=>r.test_code!=='OVERALL').forEach(r=>{line(`${testLabel(r.test_code)}: ${resultValue(r)}`,9,true);if(r.interpretation)line(r.interpretation,8);});const overall=(summary.results||[]).find(r=>r.test_code==='OVERALL');if(overall?.interpretation){line('INTERPRETASI KESELURUHAN',11,true);line(overall.interpretation);}if(sess.hr_notes){line('CATATAN HR',11,true);line(sess.hr_notes);}line('Keputusan workflow recruitment ditetapkan HR dan dipisahkan dari rekomendasi engine SiPsiko.',8);appendInventoryJobFitPdf(doc,summary);return doc;}
   async function downloadPsychPdf(appId){try{const s=await psychSummary(appId);const doc=buildPsychPdf(s,appId);if(!doc)return showToast('jsPDF belum termuat','danger');doc.save(`Hasil_Psikotes_${safeFile(candById(appById(appId)?.candidate_id)?.candidate_name)}.pdf`);}catch(e){showToast('Gagal membuat PDF: '+e.message,'danger');}}
   async function savePsychPdf(appId){try{const s=await psychSummary(appId),app=appById(appId),c=candById(app?.candidate_id),sess=s.session||{},doc=buildPsychPdf(s,appId);if(!doc)throw new Error('jsPDF belum termuat');const stamp=new Date().toISOString().replace(/[:.]/g,'-'),name=`hasil-psikotes-${safeFile(c?.candidate_name)}-${stamp}.pdf`,path=`${safePath(app.company_id)}/${safePath(appId)}/${safePath(sess.session_id)}/${name}`,blob=doc.output('blob');const {error:e1}=await sb.storage.from('psychotest-results').upload(path,blob,{contentType:'application/pdf',upsert:false});if(e1)throw e1;const {error:e2}=await sb.rpc('register_psychotest_document',{p_session_id:sess.session_id,p_storage_path:path,p_file_name:name,p_mime_type:'application/pdf'});if(e2)throw e2;injectPsychCard(appId);showToast('PDF tersimpan di Storage','success');}catch(e){showToast('Gagal simpan PDF: '+e.message,'danger');}}
   async function openPsychDoc(path){try{const {data,error}=await sb.storage.from('psychotest-results').createSignedUrl(path,120);if(error)throw error;window.open(data.signedUrl,'_blank','noopener');}catch(e){showToast('Gagal buka dokumen: '+e.message,'danger');}}
@@ -366,6 +366,85 @@
   injectUi();
   if(typeof window.renderPage==='function'){const orig=window.renderPage;window.renderPage=function(page){if(page==='screening-workbench')return renderScreening(true);if(page==='screening-rules')return renderScreeningRules();if(page==='psychotests')return renderPsych(true);return orig(page);};}
   if(typeof window.viewCandidateDetail==='function'){const orig=window.viewCandidateDetail;window.viewCandidateDetail=function(candidateId,appId){const r=orig(candidateId,appId);const id=appId||(DB?.applications||[]).find(a=>a.candidate_id===candidateId)?.application_id;if(id)setTimeout(()=>{injectScreenCard(id);injectPsychCard(id);},0);return r;};}
+
+
+  // CANDIDATE360_V262_GITHUB_SAFE_MERGE: read-only history + completed-report selectors.
+  // Preserve existing SiPsiko access, HR review, screening and interview handlers.
+  const __v262ViewOld=viewPsychResult;
+  const __v262PdfOld=downloadPsychPdf;
+  const __v262SaveOld=savePsychPdf;
+  const __v262CardOld=injectPsychCard;
+  const __v262Completed=function(raw){
+    const last=raw?.last_completed;
+    if(last?.session?.status==='Selesai')return last;
+    if(raw?.session?.status==='Selesai')return {session:raw.session,results:raw.results||[],documents:raw.documents||[]};
+    return null;
+  };
+  const __v262Notice=function(msg){if(typeof showToast==='function')showToast(msg,'warning');};
+  const __v262ReadSummary=async function(appId){
+    const raw=await psychSummary(appId);
+    if(!raw?.exists)return {raw:raw,completed:null};
+    return {raw:raw,completed:__v262Completed(raw)};
+  };
+  viewPsychResult=async function(appId){
+    try{
+      const pair=await __v262ReadSummary(appId),completed=pair.completed;
+      if(!completed)return __v262Notice('Belum ada attempt psikotes yang selesai.');
+      const s=completed, sess=s.session||{},rows=(s.results||[]).filter(r=>r.test_code!=='OVERALL');
+      const overall=(s.results||[]).find(r=>r.test_code==='OVERALL');
+      const m=document.getElementById('modalContent');
+      if(m)m.className='bg-white rounded-2xl shadow-2xl w-full max-w-5xl max-h-[92vh] overflow-y-auto';
+      const resultCards=rows.length?rows.map(psychResultCard).join(''):'<div class="rounded-xl bg-slate-50 p-4 text-sm text-slate-500">Detail hasil per tes belum tersedia. Hanya kesimpulan keseluruhan yang tersimpan.</div>';
+      openModal('<div class="p-5 md:p-7"><div class="text-xs text-slate-400">HASIL PSIKOTES · RIWAYAT SELESAI</div><h3 class="mt-1 text-xl font-bold">Hasil Psikotes - Attempt '+esc(sess.attempt_no||1)+'</h3><p class="mt-1 text-xs text-slate-500">Selesai '+esc(fmt(sess.completed_at))+'</p><div class="mt-4 space-y-3">'+resultCards+'</div>'+((overall?.interpretation)?'<section class="mt-4 rounded-xl border border-blue-100 bg-blue-50 p-4"><h4 class="font-bold text-sm">Kesimpulan Keseluruhan</h4><p class="mt-2 text-sm leading-6 whitespace-pre-wrap">'+esc(overall.interpretation)+'</p></section>':'')+'<div class="mt-4 rounded-xl bg-slate-50 p-4 text-sm"><b>Rekomendasi:</b> '+esc(sess.engine_recommendation||overall?.recommendation||'—')+'</div><div class="text-right mt-5"><button class="px-4 py-2 rounded-lg border" onclick="closeModal()">Tutup</button></div></div>');
+    }catch(e){showToast('Gagal membaca detail: '+(e.message||e),'danger');}
+  };
+  downloadPsychPdf=async function(appId){
+    try{
+      const pair=await __v262ReadSummary(appId),s=pair.completed;
+      if(!s)return __v262Notice('PDF tidak tersedia: belum ada attempt selesai.');
+      const doc=buildPsychPdf(s,appId);
+      if(!doc)return showToast('jsPDF belum termuat','danger');
+      doc.save('Hasil_Psikotes_'+safeFile(candById(appById(appId)?.candidate_id)?.candidate_name)+'_Attempt_'+Number(s.session.attempt_no||1)+'.pdf');
+    }catch(e){showToast('Gagal membuat PDF: '+(e.message||e),'danger');}
+  };
+  savePsychPdf=async function(appId){
+    try{
+      const pair=await __v262ReadSummary(appId),s=pair.completed;
+      if(!s)return __v262Notice('Tidak ada hasil selesai untuk disimpan.');
+      const app=appById(appId),c=candById(app?.candidate_id),sess=s.session||{};
+      if(!app?.company_id||!sess.session_id)throw new Error('Data sesi tidak lengkap');
+      const doc=buildPsychPdf(s,appId);
+      if(!doc)throw new Error('jsPDF belum termuat');
+      const name='hasil-psikotes-'+safeFile(c?.candidate_name)+'-attempt-'+Number(sess.attempt_no||1)+'-'+new Date().toISOString().replace(/[:.]/g,'-')+'.pdf';
+      const path=safePath(app.company_id)+'/'+safePath(appId)+'/'+safePath(sess.session_id)+'/'+name;
+      const saved=await sb.storage.from('psychotest-results').upload(path,doc.output('blob'),{contentType:'application/pdf',upsert:false});
+      if(saved.error)throw saved.error;
+      const reg=await sb.rpc('register_psychotest_document',{p_session_id:sess.session_id,p_storage_path:path,p_file_name:name,p_mime_type:'application/pdf'});
+      if(reg.error)throw reg.error;
+      injectPsychCard(appId);
+      showToast('PDF attempt selesai tersimpan','success');
+    }catch(e){showToast('Gagal simpan PDF: '+(e.message||e),'danger');}
+  };
+  injectPsychCard=async function(appId){
+    const root=document.getElementById('candidateDetailContent');
+    if(!root)return;
+    const stale=root.querySelector('#v2PsychCard');if(stale)stale.remove();
+    const h=document.createElement('div');h.id='v2PsychCard';h.className='mt-4';root.appendChild(h);
+    try{
+      const pair=await __v262ReadSummary(appId),raw=pair.raw,latest=raw?.session||{},s=pair.completed,app=appById(appId);
+      if(!raw?.exists){h.innerHTML='<div class="rounded-xl border bg-white p-4">Belum ada sesi psikotes.</div>';return;}
+      const history=Array.isArray(raw.history)?raw.history:[];
+      const hist=history.length?history.map(x=>'<tr class="border-t"><td class="px-3 py-2">Attempt '+esc(x.attempt_no)+'</td><td class="px-3 py-2">'+esc(x.status||'—')+(x.revoked?' · Dicabut':'')+'</td><td class="px-3 py-2">'+esc(fmt(x.completed_at))+'</td></tr>').join(''):'<tr><td class="p-3 text-slate-400" colspan="3">Riwayat belum tersedia.</td></tr>';
+      const rows=s?(s.results||[]).filter(r=>r.test_code!=='OVERALL'):[];
+      const overall=s?(s.results||[]).find(r=>r.test_code==='OVERALL'):null;
+      const rowCards=rows.length?rows.map(r=>'<div class="rounded-lg border p-3"><div class="text-xs text-slate-500">'+esc(testLabel(r.test_code))+'</div><b>'+esc(resultValue(r))+'</b></div>').join(''):'<div class="text-xs text-slate-500">Detail hasil per tes belum tersedia.</div>';
+      const docs=s?(s.documents||[]):[];
+      const docButtons=docs.map(d=>'<button class="text-blue-700 underline text-xs" onclick="openPsychDocV2('+JSON.stringify(String(d.storage_path||'')).replace(/"/g,'&quot;')+')">'+esc(d.file_name||'Dokumen PDF')+'</button>').join(' ');
+      const actions=s?'<button class="px-3 py-2 border rounded-lg text-xs" onclick="viewPsychResultV2('+JSON.stringify(appId).replace(/"/g,'&quot;')+')">Detail Hasil</button> <button class="px-3 py-2 border rounded-lg text-xs" onclick="downloadPsychPdfV2('+JSON.stringify(appId).replace(/"/g,'&quot;')+')">Download PDF</button> <button class="px-3 py-2 border rounded-lg text-xs" onclick="savePsychPdfV2('+JSON.stringify(appId).replace(/"/g,'&quot;')+')">Simpan PDF</button>':'';
+      const review=latest.status==='Selesai'?'<button class="px-3 py-2 rounded-lg border text-xs" onclick="openPsychReviewV2('+JSON.stringify(appId).replace(/"/g,'&quot;')+')">Review HR</button>':'';
+      h.innerHTML='<section class="rounded-xl border bg-white p-5"><h3 class="font-semibold">Psikotes · Candidate Profile 360°</h3><div class="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3"><div class="bg-slate-50 rounded-lg p-3"><div class="text-xs text-slate-500">Attempt terbaru</div><b>#'+esc(latest.attempt_no||1)+' · '+esc(latest.status||'—')+'</b></div><div class="bg-blue-50 rounded-lg p-3"><div class="text-xs text-blue-700">Hasil terakhir selesai</div><b>'+(s?'Attempt #'+esc(s.session.attempt_no)+' · '+esc(fmt(s.session.completed_at)):'Belum ada')+'</b><div class="text-xs mt-1">Rekomendasi: '+esc(s?.session?.engine_recommendation||overall?.recommendation||'—')+'</div></div></div><h4 class="mt-4 font-semibold text-sm">Hasil per Tes</h4><div class="mt-2 grid grid-cols-1 sm:grid-cols-3 gap-2">'+rowCards+'</div><h4 class="mt-4 font-semibold text-sm">Riwayat Attempt</h4><div class="mt-2 overflow-x-auto"><table class="w-full text-xs"><thead><tr class="bg-slate-50 text-left"><th class="px-3 py-2">Attempt</th><th class="px-3 py-2">Status</th><th class="px-3 py-2">Selesai</th></tr></thead><tbody>'+hist+'</tbody></table></div><div class="mt-3 flex flex-wrap gap-2">'+actions+review+'</div>'+(docButtons?'<div class="mt-3">'+docButtons+'</div>':'')+'</section>';
+    }catch(e){h.innerHTML='<div class="border rounded-xl bg-amber-50 p-4 text-sm">Gagal memuat psikotes: '+esc(e.message||e)+'</div>';}
+  };
 
   // Expose dynamic actions.
   Object.assign(window,{
