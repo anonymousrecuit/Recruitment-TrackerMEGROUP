@@ -279,7 +279,58 @@
   async function savePsychReview(appId,decision){const notes=document.getElementById('v2PsychNotes')?.value?.trim()||null;const {error}=await sb.rpc('review_psychotest_result',{p_application_id:appId,p_decision:decision,p_hr_notes:notes});if(error)return showToast('Gagal simpan review: '+error.message,'danger');closeModal();await loadPsych(true);if(currentPage==='psychotests')renderPsych(false);injectPsychCard(appId);showToast('Keputusan psikotes: '+decision,'success');}
   async function advanceToInterviewHr(appId){await transitionStage(appId,'Interview HR');}
 
-  function buildPsychPdf(summary,appId){if(!window.jspdf?.jsPDF)return null;const app=appById(appId),c=candById(app?.candidate_id),p=posById(app?.position_id),co=coById(app?.company_id),sess=summary.session||{};const {jsPDF}=window.jspdf,doc=new jsPDF();let y=16;const line=(t,s=9,b=false)=>{doc.setFontSize(s);doc.setFont('helvetica',b?'bold':'normal');for(const z of doc.splitTextToSize(String(t??'—'),180)){if(y>282){doc.addPage();y=16;}doc.text(z,15,y);y+=5;}y+=1;};line('LAPORAN HASIL PSIKOTES',15,true);line(`${c?.candidate_name||'-'} · ${p?.position_name||'-'} · ${co?.brand||co?.company_name||'-'}`,10,true);line(`Application: ${appId} · Attempt: ${sess.attempt_no||1} · Selesai: ${fmt(sess.completed_at)}`);line(`Rekomendasi SiPsiko: ${sess.engine_recommendation||((summary.results||[]).find(r=>r.test_code==='OVERALL')||{}).recommendation||'—'} · Keputusan HR: ${sess.workflow_decision||'—'}`);line('HASIL PER TES',11,true);if(!(summary.results||[]).some(r=>r.test_code!=='OVERALL'))line('Detail hasil per tes belum tersedia. Hanya kesimpulan keseluruhan yang tersimpan.',8);(summary.results||[]).filter(r=>r.test_code!=='OVERALL').forEach(r=>{line(`${testLabel(r.test_code)}: ${resultValue(r)}`,9,true);if(r.interpretation)line(r.interpretation,8);});const overall=(summary.results||[]).find(r=>r.test_code==='OVERALL');if(overall?.interpretation){line('INTERPRETASI KESELURUHAN',11,true);line(overall.interpretation);}if(sess.hr_notes){line('CATATAN HR',11,true);line(sess.hr_notes);}line('Keputusan workflow recruitment ditetapkan HR dan dipisahkan dari rekomendasi engine SiPsiko.',8);appendInventoryJobFitPdf(doc,summary);return doc;}
+  function buildPsychPdf(summary,appId){
+    const sess=summary?.session||{};
+    if(sess.status!=='Selesai'||!sess.completed_at)throw new Error('PDF hanya boleh menggunakan attempt yang sudah selesai.');
+    if(!window.jspdf?.jsPDF)return null;
+    const app=appById(appId),candidate=candById(app?.candidate_id),position=posById(app?.position_id),company=coById(app?.company_id);
+    const doc=new window.jspdf.jsPDF({orientation:'portrait',unit:'mm',format:'a4'});
+    const W=210,M=14,CW=W-2*M,limit=280;
+    let y=16,page=1;
+    const plain=v=>{const s=String(v??'');try{return new DOMParser().parseFromString(s,'text/html').body.textContent.replace(/\s+/g,' ').trim();}catch(_){return s.replace(/<[^>]*>/g,' ').replace(/\s+/g,' ').trim()}};
+    const footer=()=>{doc.setDrawColor(226,232,240);doc.line(M,286,W-M,286);doc.setFont('helvetica','normal');doc.setFontSize(7);doc.setTextColor(100,116,139);doc.text('Internal HR · '+appId,M,291);doc.text('Halaman '+page,W-M,291,{align:'right'});};
+    const next=()=>{footer();doc.addPage();page++;y=16;};
+    const ensure=h=>{if(y+h>limit)next();};
+    const paragraph=(value,size=9,color=[51,65,85],gap=4)=>{doc.setFont('helvetica','normal');doc.setFontSize(size);doc.setTextColor(...color);const lines=doc.splitTextToSize(plain(value)||'—',CW);ensure(lines.length*4.2+gap);lines.forEach(t=>{doc.text(t,M,y);y+=4.2});y+=gap;};
+    const heading=t=>{ensure(16);y+=3;doc.setFont('helvetica','bold');doc.setFontSize(11);doc.setTextColor(15,23,42);doc.text(t,M,y);y+=3;doc.setDrawColor(37,99,235);doc.setLineWidth(.45);doc.line(M,y,W-M,y);y+=6;};
+    const info=(label,value,x,top,width)=>{doc.setFillColor(248,250,252);doc.setDrawColor(226,232,240);doc.roundedRect(x,top,width,16,2,2,'FD');doc.setFont('helvetica','normal');doc.setFontSize(6.8);doc.setTextColor(100,116,139);doc.text(label.toUpperCase(),x+4,top+5);doc.setFont('helvetica','bold');doc.setFontSize(9);doc.setTextColor(15,23,42);doc.text(doc.splitTextToSize(plain(value)||'—',width-8).slice(0,2),x+4,top+10);};
+    // Header consistent with the approved V2.6.2 UAT PDF.
+    doc.setFillColor(15,23,42);doc.roundedRect(M,y,CW,28,3,3,'F');
+    doc.setFont('helvetica','normal');doc.setFontSize(7);doc.setTextColor(203,213,225);doc.text('RECRUITMENT ASSESSMENT REPORT',M+6,y+7);
+    doc.setFont('helvetica','bold');doc.setFontSize(16);doc.setTextColor(255,255,255);doc.text('LAPORAN HASIL PSIKOTES',M+6,y+15);
+    doc.setFont('helvetica','normal');doc.setFontSize(8.5);doc.setTextColor(203,213,225);
+    doc.text(doc.splitTextToSize([candidate?.candidate_name,position?.position_name,company?.brand||company?.company_name].map(plain).join(' · '),CW-12).slice(0,2),M+6,y+22);
+    y+=34;const bw=(CW-6)/2;
+    info('Application',appId,M,y,bw);
+    info('Attempt / Selesai','Attempt '+(sess.attempt_no||1)+' · '+fmt(sess.completed_at),M+bw+6,y,bw);y+=20;
+    const overall=(summary.results||[]).find(r=>r.test_code==='OVERALL')||{};
+    const recommendation=sess.engine_recommendation||overall.recommendation||'—';
+    info('Rekomendasi SiPsiko',recommendation,M,y,bw);
+    info('Keputusan HR',sess.workflow_decision||'—',M+bw+6,y,bw);y+=22;
+    heading('Hasil Per Tes');
+    const rows=(summary.results||[]).filter(r=>r.test_code!=='OVERALL');
+    if(!rows.length)paragraph('Detail hasil per tes belum tersedia. Hanya kesimpulan keseluruhan yang tersimpan pada attempt ini.',8.5,[100,116,139],5);
+    for(const r of rows){
+      ensure(20);const label=plain(testLabel(r.test_code)),value=plain(resultValue(r));doc.setFillColor(248,250,252);doc.setDrawColor(226,232,240);doc.roundedRect(M,y,CW,12,2,2,'FD');
+      doc.setFont('helvetica','bold');doc.setFontSize(9);doc.setTextColor(15,23,42);doc.text(label,M+4,y+5);
+      doc.setFontSize(9);doc.setTextColor(37,99,235);doc.text(value,W-M-4,y+5,{align:'right'});y+=16;
+      if(r.interpretation)paragraph(r.interpretation,8.4,[51,65,85],4);
+    }
+    if(overall.interpretation){
+      heading('Interpretasi Keseluruhan');
+      doc.setFont('helvetica','normal');doc.setFontSize(8.5);
+      const lines=doc.splitTextToSize(plain(overall.interpretation),CW-10),h=Math.max(18,lines.length*4+10);
+      ensure(h+4);doc.setFillColor(239,246,255);doc.setDrawColor(191,219,254);doc.roundedRect(M,y,CW,h,2,2,'FD');
+      doc.setTextColor(30,64,175);lines.forEach((t,i)=>doc.text(t,M+5,y+6+i*4));y+=h+5;
+    }
+    if(sess.hr_notes){heading('Catatan HR');paragraph(sess.hr_notes,8.5,[51,65,85],4);}
+    const note='Rekomendasi SiPsiko merupakan bahan pertimbangan. Keputusan workflow recruitment tetap ditetapkan HR berdasarkan seluruh evidence yang tersedia.';
+    doc.setFont('helvetica','normal');doc.setFontSize(7.5);
+    const noteLines=doc.splitTextToSize(note,CW-10),noteH=Math.max(14,noteLines.length*3.7+7);ensure(noteH+4);y+=2;
+    doc.setFillColor(255,251,235);doc.setDrawColor(253,230,138);doc.roundedRect(M,y,CW,noteH,2,2,'FD');doc.setTextColor(146,64,14);noteLines.forEach((t,i)=>doc.text(t,M+5,y+5+i*3.7));
+    footer();
+    return doc;
+  }
   async function downloadPsychPdf(appId){try{const s=await psychSummary(appId);const doc=buildPsychPdf(s,appId);if(!doc)return showToast('jsPDF belum termuat','danger');doc.save(`Hasil_Psikotes_${safeFile(candById(appById(appId)?.candidate_id)?.candidate_name)}.pdf`);}catch(e){showToast('Gagal membuat PDF: '+e.message,'danger');}}
   async function savePsychPdf(appId){try{const s=await psychSummary(appId),app=appById(appId),c=candById(app?.candidate_id),sess=s.session||{},doc=buildPsychPdf(s,appId);if(!doc)throw new Error('jsPDF belum termuat');const stamp=new Date().toISOString().replace(/[:.]/g,'-'),name=`hasil-psikotes-${safeFile(c?.candidate_name)}-${stamp}.pdf`,path=`${safePath(app.company_id)}/${safePath(appId)}/${safePath(sess.session_id)}/${name}`,blob=doc.output('blob');const {error:e1}=await sb.storage.from('psychotest-results').upload(path,blob,{contentType:'application/pdf',upsert:false});if(e1)throw e1;const {error:e2}=await sb.rpc('register_psychotest_document',{p_session_id:sess.session_id,p_storage_path:path,p_file_name:name,p_mime_type:'application/pdf'});if(e2)throw e2;injectPsychCard(appId);showToast('PDF tersimpan di Storage','success');}catch(e){showToast('Gagal simpan PDF: '+e.message,'danger');}}
   async function openPsychDoc(path){try{const {data,error}=await sb.storage.from('psychotest-results').createSignedUrl(path,120);if(error)throw error;window.open(data.signedUrl,'_blank','noopener');}catch(e){showToast('Gagal buka dokumen: '+e.message,'danger');}}
